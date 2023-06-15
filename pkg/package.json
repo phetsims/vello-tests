@@ -1,0 +1,14 @@
+{
+  "name": "vello-js",
+  "version": "0.1.0",
+  "files": [
+    "vello_js_bg.wasm",
+    "vello_js.js",
+    "vello_js.d.ts"
+  ],
+  "module": "vello_js.js",
+  "types": "vello_js.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
