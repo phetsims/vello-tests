@@ -3,6 +3,12 @@ vello-tests
 
 Rough proof-of-concept testing to explore integrating [Vello](https://github.com/linebender/vello)
 
+REQUIRES WebGPU.
+
+## Demo
+
+https://phetsims.github.io/vello-tests/
+
 ## Setup
 
 1. Install Rust (https://www.rust-lang.org/tools/install)
@@ -10,3 +16,4 @@ Rough proof-of-concept testing to explore integrating [Vello](https://github.com
 3. Install rust wasm32 target: `rustup target add wasm32-unknown-unknown`
 4. Build with `wasm-pack build --target web`
 5. View the index.html in a browser.
+
