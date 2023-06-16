@@ -54,21 +54,19 @@ init().then( async () => {
   let c = Math.cos( angle );
   let s = Math.sin( angle );
 
-  encoding.matrix( c, s, -s, c, 200, 100 );
+  encoding.matrix( c, -s, s, c, 200, 100 );
   encoding.linewidth( -1 );
   encoding.json_path( true, true, JSON.stringify( [
     { type: 'MoveTo', x: -100, y: -100 },
     { type: 'QuadTo', x1: 0, y1: 0, x2: 100, y2: -100 },
-    // { type: 'LineTo', x: 100, y: -100 },
     { type: 'LineTo', x: 100, y: 100 },
     { type: 'CubicTo', x1: 0, y1: 200, x2: 0, y2: 0, x3: -100, y3: 100 },
-    // { type: 'LineTo', x: -100, y: 100 },
     { type: 'LineTo', x: -100, y: -100 },
     { type: 'Close' }
   ] ) );
   encoding.color( 0xffffffff );
 
-  encoding.matrix( c, s, -s, c, 200, 300 );
+  encoding.matrix( c, -s, s, c, 200, 300 );
   encoding.linewidth( -1 );
   encoding.json_path( true, true, JSON.stringify( [
     { type: 'MoveTo', x: -100, y: -100 },
@@ -81,7 +79,7 @@ init().then( async () => {
   encoding.color( 0xff0000ff );
 
   // TODO: why is the third one not showing up? Seems like it only shows up if we execute another dummy path
-  encoding.matrix( c, s, -s, c, 200, 400 );
+  encoding.matrix( c, -s, s, c, 200, 400 );
   encoding.linewidth( -1 );
   encoding.json_path( true, true, JSON.stringify( [
     { type: 'MoveTo', x: -100, y: -100 },
@@ -96,7 +94,7 @@ init().then( async () => {
   encoding.matrix( 3, 0, 0, 3, 50, 150 );
   encoding.linewidth( -1 );
   encoding.svg_path( true, 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' );
-  encoding.color( 0xff00ff01 ); // TODO: alpha seems buggy, not blending well
+  encoding.color( 0xff00ff66 ); // TODO: alpha seems buggy, not blending well
 
   encoding.matrix( 3, 0, 0, 3, 50, 150 );
   encoding.linewidth( 1 );

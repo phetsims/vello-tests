@@ -275,7 +275,7 @@ impl VelloEncoding {
         self.encoding.encode_linewidth( linewidth );
     }
 
-    pub fn matrix(&mut self, a00: f32, a01: f32, a10: f32, a11: f32, a20: f32, a21: f32) {
+    pub fn matrix(&mut self, a00: f32, a10: f32, a01: f32, a11: f32, a20: f32, a21: f32) {
         self.encoding.encode_transform( Transform {
             matrix: [ a00, a10, a01, a11 ],
             translation: [ a20, a21 ]
@@ -379,20 +379,13 @@ impl VelloEncoding {
     }
 
     pub fn color(&mut self, rgba: u32) {
-        // TODO: should we include a transform for the color? Seems ok to skip for now
-        // self.encoding.encode_transform( Transform::IDENTITY );
         self.encoding.encode_color( DrawColor {
-            rgba
+            rgba: rgba8_to_color(rgba).to_premul_u32() // Need premultiplied
         } );
     }
 
     pub fn render(&mut self, width: u32, height: u32, base_color: u32) -> RenderInfo {
-        let base_color = peniko::Color::rgba8(
-            (base_color >> 24) as u8,
-            (base_color >> 16) as u8,
-            (base_color >> 8) as u8,
-            base_color as u8
-        );
+        let base_color = rgba8_to_color(base_color);
 
         let mut resolver = Resolver::new();
         let mut packed: Vec<u8> = vec![];
@@ -410,6 +403,15 @@ impl VelloEncoding {
             render_config: cpu_config
         }
     }
+}
+
+pub fn rgba8_to_color(rgba: u32) -> peniko::Color {
+    peniko::Color::rgba8(
+        (rgba >> 24) as u8,
+        (rgba >> 16) as u8,
+        (rgba >> 8) as u8,
+        rgba as u8
+    )
 }
 
 #[wasm_bindgen(start)]
