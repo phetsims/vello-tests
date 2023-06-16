@@ -65,7 +65,6 @@ init().then( async () => {
     { type: 'LineTo', x: -100, y: -100 },
     { type: 'Close' }
   ] ) );
-  // encoding.color( 0xffffffff );
   encoding.linear_gradient( -100, 0, 100, 0, 1, 0, new Float32Array( [ 0, 1 ] ), new Uint32Array( [ 0xff0000ff, 0x0000ffff ] ) );
 
   encoding.matrix( c, -s, s, c, 200, 300 );
@@ -91,7 +90,7 @@ init().then( async () => {
     { type: 'LineTo', x: -100, y: -100 },
     { type: 'Close' }
   ] ) );
-  encoding.color( 0x00ff00ff );
+  encoding.radial_gradient( 0, 0, 0, 0, 20, 120, 1, 0, new Float32Array( [ 0, 1 ] ), new Uint32Array( [ 0x0000ffff, 0x00ff00ff ] ) );
 
   encoding.matrix( 3, 0, 0, 3, 50, 150 );
   encoding.linewidth( -1 );

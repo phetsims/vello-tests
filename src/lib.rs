@@ -1,5 +1,5 @@
 use wasm_bindgen::prelude::*;
-use vello_encoding::{Encoding, Resolver, RenderConfig, DrawColor, DrawLinearGradient, Transform, Layout, ConfigUniform, BufferSize, WorkgroupCounts, WorkgroupSize, BufferSizes};
+use vello_encoding::{Encoding, Resolver, RenderConfig, DrawColor, DrawLinearGradient, DrawRadialGradient, Transform, Layout, ConfigUniform, BufferSize, WorkgroupCounts, WorkgroupSize, BufferSizes};
 use bytemuck;
 use peniko::{kurbo, Extend, ColorStop};
 
@@ -406,11 +406,33 @@ impl VelloEncoding {
         self.encoding.encode_color( rgba8_to_draw_color( rgba ) );
     }
 
-    pub fn linear_gradient(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, alpha: f32, extend: u8, offsets: js_sys::Float32Array, colors: js_sys::Uint32Array ) {
+    pub fn linear_gradient(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, alpha: f32, extend: u8, offsets: js_sys::Float32Array, colors: js_sys::Uint32Array ) {
+        // TODO: factor out offsets/colors -> impl Iterator<Item = ColorStop>
+        // TODO: ran into to_vec() issues, need to learn more Rust
         self.encoding.encode_linear_gradient( DrawLinearGradient {
             index: 0,
-            p0: [ x1, y1 ],
-            p1: [ x2, y2 ]
+            p0: [ x0, y0 ],
+            p1: [ x1, y1 ]
+        }, offsets.to_vec().iter().zip( colors.to_vec().iter() ).map(|(offset, color)| {
+            ColorStop {
+                offset: *offset,
+                color: rgba8_to_color(*color)
+            }
+        }), alpha, match extend {
+            0 => Extend::Pad,
+            1 => Extend::Repeat,
+            2 => Extend::Reflect,
+            _ => panic!("Unknown extend mode")
+        } );
+    }
+
+    pub fn radial_gradient(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, r0: f32, r1: f32, alpha: f32, extend: u8, offsets: js_sys::Float32Array, colors: js_sys::Uint32Array ) {
+        self.encoding.encode_radial_gradient( DrawRadialGradient {
+            index: 0,
+            p0: [ x0, y0 ],
+            p1: [ x1, y1 ],
+            r0,
+            r1
         }, offsets.to_vec().iter().zip( colors.to_vec().iter() ).map(|(offset, color)| {
             ColorStop {
                 offset: *offset,
