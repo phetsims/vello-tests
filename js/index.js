@@ -108,11 +108,7 @@ init().then( async () => {
 
   encoding.free();
 
-  // Dummy path to make the previous paths show up (since we're a fill with no area, it shouldn't show up)
-  sceneEncoding.json_path( true, true, JSON.stringify( [
-    { type: 'MoveTo', x: 0, y: 0 },
-    { type: 'LineTo', x: 1, y: 0 }
-  ] ) );
+  sceneEncoding.finalize_scene();
 
   const renderInfo = sceneEncoding.render( width, height, 0x666666ff );
 

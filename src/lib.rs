@@ -404,6 +404,11 @@ impl VelloEncoding {
         } );
     }
 
+    pub fn finalize_scene(&mut self) {
+        // Dummy path to make the previous paths show up (since we're a fill with no area, it shouldn't show up)
+        self.svg_path(true, String::from("M 0 0 L 1 0"));
+    }
+
     pub fn render(&mut self, width: u32, height: u32, base_color: u32) -> RenderInfo {
         let base_color = rgba8_to_color(base_color);
 
