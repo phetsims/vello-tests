@@ -24,7 +24,6 @@ init().then( async () => {
   } );
 
   const preferredFormat = navigator.gpu.getPreferredCanvasFormat();
-  const actualFormat = 'rgba8unorm';
 
   const shaders = shaderCreator( preferredFormat );
   window.shaders = shaders;
@@ -55,6 +54,38 @@ init().then( async () => {
   let c = Math.cos( angle );
   let s = Math.sin( angle );
 
+  // image ID => { id, image, width, height, buffer }
+  const imageMap = {};
+
+  const addImage = ( width, height, buffer ) => {
+    const image = VelloEncoding.new_image( width, height );
+    const id = image.id();
+    imageMap[ id ] = {
+      id,
+      image,
+      width,
+      height,
+      buffer
+    };
+    return image;
+  };
+
+  const demoImageWidth = 256;
+  const demoImageHeight = 256;
+  // Required size for texture data layout (258304) exceeds the linear data size (16384) with offset (0).
+  // Required size for texture data layout (1045504) exceeds the linear data size (262144) with offset (0).
+  const demoImageData = new Uint8Array( demoImageWidth * demoImageHeight * 4 );
+  for ( let x = 0; x < demoImageWidth; x++ ) {
+    for ( let y = 0; y < demoImageHeight; y++ ) {
+      const index = ( x + y * demoImageWidth ) * 4;
+      demoImageData[ index + 0 ] = x;
+      demoImageData[ index + 1 ] = y;
+      demoImageData[ index + 2 ] = 0;
+      demoImageData[ index + 3 ] = 255;
+    }
+  }
+  const demoImage = addImage( demoImageWidth, demoImageHeight, demoImageData.buffer );
+
   encoding.matrix( c, -s, s, c, 200, 100 );
   encoding.linewidth( -1 );
   encoding.json_path( true, true, JSON.stringify( [
@@ -67,17 +98,20 @@ init().then( async () => {
   ] ) );
   encoding.linear_gradient( -100, 0, 100, 0, 1, 0, new Float32Array( [ 0, 1 ] ), new Uint32Array( [ 0xff0000ff, 0x0000ffff ] ) );
 
-  encoding.matrix( c, -s, s, c, 200, 300 );
+  encoding.matrix( c, -s, s, c, 150, 200 );
   encoding.linewidth( -1 );
   encoding.json_path( true, true, JSON.stringify( [
-    { type: 'MoveTo', x: -100, y: -100 },
-    { type: 'LineTo', x: 100, y: -100 },
-    { type: 'LineTo', x: 300, y: 100 },
-    { type: 'LineTo', x: -100, y: 100 },
-    { type: 'LineTo', x: -100, y: -100 },
+    { type: 'MoveTo', x: 0, y: 0 },
+    { type: 'LineTo', x: 256 - 128, y: 0 },
+    { type: 'QuadTo', x1: 256, y1: 0, x2: 256, y2: 128 },
+    { type: 'LineTo', x: 256, y: 256 },
+    { type: 'LineTo', x: 128, y: 256 },
+    { type: 'QuadTo', x1: 0, y1: 256, x2: 0, y2: 128 },
+    { type: 'LineTo', x: 0, y: 0 },
     { type: 'Close' }
   ] ) );
-  encoding.color( 0xff0000ff );
+  // encoding.color( 0xff0000ff );
+  encoding.image( demoImage, 1 );
 
   encoding.matrix( c, -s, s, c, 200, 400 );
   encoding.linewidth( -1 );
@@ -101,9 +135,13 @@ init().then( async () => {
   encoding.svg_path( false, 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' );
   encoding.color( 0x000000ff );
 
+  // encoding.matrix( 1, 0, 0, 1, 0, 0 );
+  // encoding.svg_path( true, 'M 0 0 L 256 0 L 256 256 L 0 256 L 0 0 Z ' );
+  // encoding.image( demoImage, 1 );
+
   sceneEncoding.append( encoding );
-  sceneEncoding.append_with_transform( encoding, 1, 0, 0, 1, 50, 40 );
-  sceneEncoding.append_with_transform( encoding, 1, 0, 0, 1, 100, 80 );
+  // sceneEncoding.append_with_transform( encoding, 1, 0, 0, 1, 50, 40 );
+  // sceneEncoding.append_with_transform( encoding, 1, 0, 0, 1, 100, 80 );
 
   encoding.free();
 
@@ -174,11 +212,17 @@ init().then( async () => {
   } );
 
   const sceneBytes = renderInfo.scene();
+
   const ramps = renderInfo.ramps();
   const rampsWidth = renderInfo.ramps_width;
   const rampsHeight = renderInfo.ramps_height;
-  // const layout = renderInfo.layout();
-  // const configUniform = renderInfo.config_uniform();
+  const hasRamps = rampsHeight > 0;
+
+  const images = renderInfo.images();
+  const imagesWidth = renderInfo.images_width;
+  const imagesHeight = renderInfo.images_height;
+  const hasImages = images.length > 0;
+
   const workgroupCounts = renderInfo.workgroup_counts();
   const bufferSizes = renderInfo.buffer_sizes();
   const configBytes = renderInfo.config_bytes();
@@ -347,24 +391,23 @@ init().then( async () => {
   //     recording.download(*bump_buf.as_buf().unwrap());
   // }
 
-  const outImage = device.createTexture( {
-    label: 'outImage',
-    size: {
-      width: width,
-      height: height,
-      depthOrArrayLayers: 1
-    },
-    format: actualFormat,
-    // TODO: wtf, usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-    usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.STORAGE_BINDING
-  } );
-  const outImageView = outImage.createView( {
-    label: 'outImageView',
-    format: actualFormat,
-    dimension: '2d'
-  } );
+  // const outImage = device.createTexture( {
+  //   label: 'outImage',
+  //   size: {
+  //     width: width,
+  //     height: height,
+  //     depthOrArrayLayers: 1
+  //   },
+  //   format: actualFormat,
+  //   // TODO: wtf, usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+  //   usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.STORAGE_BINDING
+  // } );
+  // const outImageView = outImage.createView( {
+  //   label: 'outImageView',
+  //   format: actualFormat,
+  //   dimension: '2d'
+  // } );
 
-  const hasRamps = rampsHeight > 0;
   const gradientWidth = hasRamps ? rampsWidth : 1;
   const gradientHeight = hasRamps ? rampsHeight : 1;
   const gradientImage = device.createTexture( {
@@ -398,11 +441,14 @@ init().then( async () => {
     } );
   }
 
+  // TODO: Do we have "repeat" on images also? Think repeating patterns! Also alpha
+  const atlasWidth = hasImages ? imagesWidth : 1;
+  const atlasHeight = hasImages ? imagesHeight : 1;
   const atlasImage = device.createTexture( {
     label: 'atlasImage',
     size: {
-      width: 1, // TODO: actual
-      height: 1, // TODO: actual
+      width: atlasWidth,
+      height: atlasHeight,
       depthOrArrayLayers: 1
     },
     format: 'rgba8unorm',
@@ -413,6 +459,35 @@ init().then( async () => {
     format: 'rgba8unorm',
     dimension: '2d'
   } );
+
+  if ( hasImages ) {
+    for ( let i = 0; i < images.length; i += 3 ) {
+      const id = images[ i ];
+      const x = Number( images[ i + 1 ] );
+      const y = Number( images[ i + 2 ] );
+
+      const entry = imageMap[ id ];
+
+      if ( entry ) {
+        const block_size = 4;
+
+        device.queue.writeTexture( {
+          texture: atlasImage,
+          origin: { x, y, z: 0 }
+        }, entry.buffer, {
+          offset: 0,
+          bytesPerRow: entry.width * block_size
+        }, {
+          width: entry.width,
+          height: entry.height,
+          depthOrArrayLayers: 1
+        } );
+      }
+      else {
+        throw new Error( 'missing image' );
+      }
+    }
+  }
 
   const canvasOutView = context.getCurrentTexture().createView();
 
@@ -477,6 +552,7 @@ init().then( async () => {
   device.queue.submit( [ commandBuffer ] );
 
   sceneEncoding.free();
+  demoImage.free();
 });
 
 // NOTE: Some render-path notes below:

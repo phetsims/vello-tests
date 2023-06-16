@@ -226,7 +226,13 @@ pub struct RenderInfo {
     render_config: RenderConfig,
     ramps: Vec<u8>,
     pub ramps_width: u32,
-    pub ramps_height: u32
+    pub ramps_height: u32,
+
+    // Packed as triples of (image ID, x, y)
+    images: Vec<u64>,
+
+    pub images_width: u32,
+    pub images_height: u32,
 }
 
 #[wasm_bindgen]
@@ -235,6 +241,7 @@ impl RenderInfo {
         js_sys::Uint8Array::from(&self.scene[..])
     }
     pub fn ramps(&self) -> js_sys::Uint8Array { js_sys::Uint8Array::from(&self.ramps[..]) }
+    pub fn images(&self) -> js_sys::BigUint64Array { js_sys::BigUint64Array::from(&self.images[..]) }
     pub fn layout(&self) -> VelloLayout {
         VelloLayout::from_layout( self.layout )
     }
@@ -249,6 +256,18 @@ impl RenderInfo {
     }
     pub fn config_bytes(&self) -> js_sys::Uint8Array {
         js_sys::Uint8Array::from(bytemuck::bytes_of(&self.render_config.gpu))
+    }
+}
+
+#[wasm_bindgen]
+pub struct VelloImage {
+    image: peniko::Image
+}
+
+#[wasm_bindgen]
+impl VelloImage {
+    pub fn id(&self) -> u64 {
+        self.image.data.id()
     }
 }
 
@@ -276,9 +295,18 @@ impl VelloEncoding {
         }
     }
 
+    // Creates an image stub (no data) with the given dimensions
+    pub fn new_image(width: u32, height: u32) -> VelloImage {
+        web_sys::console::log_1( &JsValue::from( format!( "new_image {width} {height}" ) ) );
+        VelloImage {
+            image: peniko::Image::new(peniko::Blob::new( std::sync::Arc::new( Vec::new()) ),peniko::Format::Rgba8, width, height)
+        }
+    }
+
     // TODO: appending, and perhaps initialization based on whether it is a fragment or not?
     // TODO: gradients and images
     // TODO: clipping
+    // TODO: layer push/pop on scenebuilder
 
     pub fn append(&mut self, other: &VelloEncoding) {
         self.encoding.append( &other.encoding, &None );
@@ -446,6 +474,14 @@ impl VelloEncoding {
         } );
     }
 
+    // TODO: since we're manually free'ing VelloImage, are we going to blow away the encoding ImageCache?
+    // TODO: probably need to free encodings using any images BEFORE the images?
+    // TODO: do a full check into this
+    pub fn image(&mut self, image: &VelloImage, alpha: f32) {
+        web_sys::console::log_1( &JsValue::from( format!( "image {} {}", image.image.width, image.image.height ) ) );
+        self.encoding.encode_image(&image.image, alpha);
+    }
+
     pub fn finalize_scene(&mut self) {
         // Dummy path to make the previous paths show up (since we're a fill with no area, it shouldn't show up)
         self.svg_path(true, String::from("M 0 0 L 1 0"));
@@ -470,7 +506,10 @@ impl VelloEncoding {
             render_config: cpu_config,
             ramps: ( bytemuck::cast_slice(ramps.data) as &[u8] ).into(),
             ramps_width: ramps.width,
-            ramps_height: ramps.height
+            ramps_height: ramps.height,
+            images: images.images.iter().map(|entry| [entry.0.data.id(), entry.1 as u64, entry.2 as u64]).flatten().collect(),
+            images_width: images.width,
+            images_height: images.height
         }
     }
 }
