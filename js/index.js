@@ -79,7 +79,6 @@ init().then( async () => {
   ] ) );
   encoding.color( 0xff0000ff );
 
-  // TODO: why is the third one not showing up? Seems like it only shows up if we execute another dummy path
   encoding.matrix( c, -s, s, c, 200, 400 );
   encoding.linewidth( -1 );
   encoding.json_path( true, true, JSON.stringify( [
@@ -95,7 +94,7 @@ init().then( async () => {
   encoding.matrix( 3, 0, 0, 3, 50, 150 );
   encoding.linewidth( -1 );
   encoding.svg_path( true, 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' );
-  encoding.color( 0xff00ff66 ); // TODO: alpha seems buggy, not blending well
+  encoding.color( 0xff00ff66 );
 
   encoding.matrix( 3, 0, 0, 3, 50, 150 );
   encoding.linewidth( 1 );
