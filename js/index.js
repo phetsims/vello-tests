@@ -1,6 +1,6 @@
 
 import shaderCreator from "./shaders.js";
-import { default as init, VelloEncoding } from "../pkg/vello_tests.js";
+import { default as init, VelloEncoding, VelloMix, VelloCompose } from "../pkg/vello_tests.js";
 
 init().then( async () => {
   const width = 512;
@@ -48,11 +48,7 @@ init().then( async () => {
   canvas.style.height = `${Math.floor( height / backingScale )}px`;
 
   const sceneEncoding = VelloEncoding.new_scene();
-
   const encoding = new VelloEncoding();
-  const angle = 0.3;
-  let c = Math.cos( angle );
-  let s = Math.sin( angle );
 
   // image ID => { id, image, width, height, buffer }
   const imageMap = {};
@@ -70,21 +66,24 @@ init().then( async () => {
     return image;
   };
 
+  /***************************************************************************/
+  // Scene
+  /***************************************************************************/
+
+  // An example image with a gradient
   const demoImageWidth = 256;
   const demoImageHeight = 256;
-  // Required size for texture data layout (258304) exceeds the linear data size (16384) with offset (0).
-  // Required size for texture data layout (1045504) exceeds the linear data size (262144) with offset (0).
   const demoImageData = new Uint8Array( demoImageWidth * demoImageHeight * 4 );
   for ( let x = 0; x < demoImageWidth; x++ ) {
     for ( let y = 0; y < demoImageHeight; y++ ) {
-      const index = ( x + y * demoImageWidth ) * 4;
-      demoImageData[ index + 0 ] = x;
-      demoImageData[ index + 1 ] = y;
-      demoImageData[ index + 2 ] = 0;
-      demoImageData[ index + 3 ] = 255;
+      demoImageData.set( [ x, y, 0, 255 ], ( x + y * demoImageWidth ) * 4 );
     }
   }
   const demoImage = addImage( demoImageWidth, demoImageHeight, demoImageData.buffer );
+
+  const angle = 0.3;
+  let c = Math.cos( angle );
+  let s = Math.sin( angle );
 
   encoding.matrix( c, -s, s, c, 200, 100 );
   encoding.linewidth( -1 );
@@ -100,30 +99,20 @@ init().then( async () => {
 
   encoding.matrix( c, -s, s, c, 150, 200 );
   encoding.linewidth( -1 );
-  encoding.json_path( true, true, JSON.stringify( [
-    { type: 'MoveTo', x: 0, y: 0 },
-    { type: 'LineTo', x: 256 - 128, y: 0 },
-    { type: 'QuadTo', x1: 256, y1: 0, x2: 256, y2: 128 },
-    { type: 'LineTo', x: 256, y: 256 },
-    { type: 'LineTo', x: 128, y: 256 },
-    { type: 'QuadTo', x1: 0, y1: 256, x2: 0, y2: 128 },
-    { type: 'LineTo', x: 0, y: 0 },
-    { type: 'Close' }
-  ] ) );
-  // encoding.color( 0xff0000ff );
+  encoding.svg_path( true, 'M 0 0 L 128 0 Q 256 0 256 128 L 256 256 L 128 256 Q 0 256 0 128 L 0 0 Z' );
   encoding.image( demoImage, 1 );
 
   encoding.matrix( c, -s, s, c, 200, 400 );
   encoding.linewidth( -1 );
-  encoding.json_path( true, true, JSON.stringify( [
-    { type: 'MoveTo', x: -100, y: -100 },
-    { type: 'LineTo', x: 100, y: -100 },
-    { type: 'LineTo', x: 0, y: 100 },
-    { type: 'LineTo', x: -100, y: 100 },
-    { type: 'LineTo', x: -100, y: -100 },
-    { type: 'Close' }
-  ] ) );
+  encoding.svg_path( true, 'M -100 -100 L 100 -100 L 0 100 L -100 100 L -100 -100 Z' );
   encoding.radial_gradient( 0, 0, 0, 0, 20, 120, 1, 0, new Float32Array( [ 0, 1 ] ), new Uint32Array( [ 0x0000ffff, 0x00ff00ff ] ) );
+
+  // For a layer push: matrix, linewidth(-1), shape, begin_clip
+  encoding.matrix( 1, 0, 0, 1, 0, 0 );
+  encoding.linewidth( -1 );
+  // TODO: add rect() to avoid overhead
+  encoding.svg_path( true, 'M 0 0 L 512 0 L 256 256 L 0 512 Z' );
+  encoding.begin_clip( VelloMix.Clip, VelloCompose.SrcOver, 0.5 ); // TODO: alpha 0.5 on clip layer fails EXCEPT on fine tiles where it ends
 
   encoding.matrix( 3, 0, 0, 3, 50, 150 );
   encoding.linewidth( -1 );
@@ -135,13 +124,10 @@ init().then( async () => {
   encoding.svg_path( false, 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' );
   encoding.color( 0x000000ff );
 
-  // encoding.matrix( 1, 0, 0, 1, 0, 0 );
-  // encoding.svg_path( true, 'M 0 0 L 256 0 L 256 256 L 0 256 L 0 0 Z ' );
-  // encoding.image( demoImage, 1 );
+  encoding.end_clip();
 
   sceneEncoding.append( encoding );
-  // sceneEncoding.append_with_transform( encoding, 1, 0, 0, 1, 50, 40 );
-  // sceneEncoding.append_with_transform( encoding, 1, 0, 0, 1, 100, 80 );
+  sceneEncoding.append_with_transform( encoding, 0.4, 0, 0, 0.4, Math.floor( 512 * ( 1 - 0.4 ) ) + 20, 0 );
 
   encoding.free();
 
@@ -228,8 +214,6 @@ init().then( async () => {
   const configBytes = renderInfo.config_bytes();
   console.log( `use_large_path_scan: ${workgroupCounts.use_large_path_scan}` );
 
-  // TODO: gradients/images here
-
   // TODO: We'll need a solution to pool buffers
   const createBuffer = ( label, size ) => {
     const buffer = device.createBuffer( {
@@ -304,7 +288,6 @@ init().then( async () => {
 
   const tagmonoidBuffer = createBuffer( 'tagmonoid buffer', bufferSizes.path_monoids.size_in_bytes );
 
-  // TODO: running the right shader?
   if ( workgroupCounts.use_large_path_scan ) {
     dispatch( 'pathtag_scan', 'pathtag_scan_large', workgroupCounts.path_scan, [ configBuffer, sceneBuffer, pathtag_parent, tagmonoidBuffer ] );
   }
