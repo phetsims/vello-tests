@@ -1,6 +1,7 @@
 use wasm_bindgen::prelude::*;
 use vello_encoding::{Encoding, Resolver, RenderConfig, DrawColor, Transform, Layout, ConfigUniform, BufferSize, WorkgroupCounts, WorkgroupSize, BufferSizes};
 use bytemuck;
+use peniko::kurbo;
 
 // Install rust
 // Ensure we have wasm32 target with `rustup target add wasm32-unknown-unknown`
@@ -279,6 +280,12 @@ impl VelloEncoding {
             matrix: [ a00, a10, a01, a11 ],
             translation: [ a20, a21 ]
         } );
+    }
+
+    pub fn svg_path(&mut self, is_fill: bool, path: String ) {
+        let path = kurbo::BezPath::from_svg( &path.as_str() ).unwrap();
+
+        self.encoding.encode_shape(&path, is_fill);
     }
 
     // wasm_bindgen REALLY doesn't like lifetimes, I fought a battle to create a Path wrapper struct

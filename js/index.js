@@ -1,6 +1,6 @@
 
 import shaderCreator from "./shaders.js";
-import { default as init, VelloEncoding } from "../pkg/vello_js.js";
+import { default as init, VelloEncoding } from "../pkg/vello_tests.js";
 
 init().then( async () => {
   const width = 512;
@@ -93,13 +93,23 @@ init().then( async () => {
   ] ) );
   encoding.color( 0x00ff00ff );
 
+  encoding.matrix( 3, 0, 0, 3, 50, 150 );
+  encoding.linewidth( -1 );
+  encoding.svg_path( true, 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' );
+  encoding.color( 0xff00ff01 ); // TODO: alpha seems buggy, not blending well
+
+  encoding.matrix( 3, 0, 0, 3, 50, 150 );
+  encoding.linewidth( 1 );
+  encoding.svg_path( false, 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' );
+  encoding.color( 0x000000ff );
+
   // Dummy path to make the previous paths show up (since we're a fill with no area, it shouldn't show up)
   encoding.json_path( true, true, JSON.stringify( [
     { type: 'MoveTo', x: 0, y: 0 },
     { type: 'LineTo', x: 1, y: 0 }
   ] ) );
 
-  const renderInfo = encoding.render( width, height, 0x000066ff );
+  const renderInfo = encoding.render( width, height, 0x666666ff );
 
   Object.keys( shaders ).forEach( shaderName => {
     const shader = shaders[ shaderName ];
