@@ -55,6 +55,7 @@ init().then( async () => {
   let s = Math.sin( angle );
 
   encoding.matrix( c, s, -s, c, 200, 100 );
+  encoding.linewidth( -1 );
   encoding.json_path( true, true, JSON.stringify( [
     { type: 'MoveTo', x: -100, y: -100 },
     { type: 'QuadTo', x1: 0, y1: 0, x2: 100, y2: -100 },
@@ -62,30 +63,41 @@ init().then( async () => {
     { type: 'LineTo', x: 100, y: 100 },
     { type: 'CubicTo', x1: 0, y1: 200, x2: 0, y2: 0, x3: -100, y3: 100 },
     // { type: 'LineTo', x: -100, y: 100 },
-    { type: 'LineTo', x: -100, y: -100 }
+    { type: 'LineTo', x: -100, y: -100 },
+    { type: 'Close' }
   ] ) );
   encoding.color( 0xffffffff );
 
   encoding.matrix( c, s, -s, c, 200, 300 );
+  encoding.linewidth( -1 );
   encoding.json_path( true, true, JSON.stringify( [
     { type: 'MoveTo', x: -100, y: -100 },
     { type: 'LineTo', x: 100, y: -100 },
     { type: 'LineTo', x: 300, y: 100 },
     { type: 'LineTo', x: -100, y: 100 },
-    { type: 'LineTo', x: -100, y: -100 }
+    { type: 'LineTo', x: -100, y: -100 },
+    { type: 'Close' }
   ] ) );
   encoding.color( 0xff0000ff );
 
   // TODO: why is the third one not showing up? Seems like it only shows up if we execute another dummy path
   encoding.matrix( c, s, -s, c, 200, 400 );
+  encoding.linewidth( -1 );
   encoding.json_path( true, true, JSON.stringify( [
     { type: 'MoveTo', x: -100, y: -100 },
     { type: 'LineTo', x: 100, y: -100 },
     { type: 'LineTo', x: 0, y: 100 },
     { type: 'LineTo', x: -100, y: 100 },
-    { type: 'LineTo', x: -100, y: -100 }
+    { type: 'LineTo', x: -100, y: -100 },
+    { type: 'Close' }
   ] ) );
   encoding.color( 0x00ff00ff );
+
+  // Dummy path to make the previous paths show up (since we're a fill with no area, it shouldn't show up)
+  encoding.json_path( true, true, JSON.stringify( [
+    { type: 'MoveTo', x: 0, y: 0 },
+    { type: 'LineTo', x: 1, y: 0 }
+  ] ) );
 
   const renderInfo = encoding.render( width, height, 0x000066ff );
 
