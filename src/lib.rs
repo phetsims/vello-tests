@@ -263,9 +263,29 @@ impl VelloEncoding {
         }
     }
 
+    pub fn new_scene() -> VelloEncoding {
+        let mut encoding = Encoding::new();
+        encoding.reset( false );
+
+        VelloEncoding {
+            encoding
+        }
+    }
+
     // TODO: appending, and perhaps initialization based on whether it is a fragment or not?
     // TODO: gradients and images
     // TODO: clipping
+
+    pub fn append(&mut self, other: &VelloEncoding) {
+        self.encoding.append( &other.encoding, &None );
+    }
+
+    pub fn append_with_transform(&mut self, other: &VelloEncoding, a00: f32, a10: f32, a01: f32, a11: f32, a20: f32, a21: f32) {
+        self.encoding.append( &other.encoding, &Some( Transform {
+            matrix: [ a00, a10, a01, a11 ],
+            translation: [ a20, a21 ]
+        } ) );
+    }
 
     pub fn reset(&mut self, is_fragment: bool) {
         self.encoding.reset( is_fragment );

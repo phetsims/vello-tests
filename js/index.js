@@ -48,8 +48,9 @@ init().then( async () => {
   canvas.style.width = `${Math.floor( width / backingScale )}px`;
   canvas.style.height = `${Math.floor( height / backingScale )}px`;
 
+  const sceneEncoding = VelloEncoding.new_scene();
+
   const encoding = new VelloEncoding();
-  encoding.reset( false );
   const angle = 0.3;
   let c = Math.cos( angle );
   let s = Math.sin( angle );
@@ -101,13 +102,19 @@ init().then( async () => {
   encoding.svg_path( false, 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' );
   encoding.color( 0x000000ff );
 
+  sceneEncoding.append( encoding );
+  sceneEncoding.append_with_transform( encoding, 1, 0, 0, 1, 50, 40 );
+  sceneEncoding.append_with_transform( encoding, 1, 0, 0, 1, 100, 80 );
+
+  encoding.free();
+
   // Dummy path to make the previous paths show up (since we're a fill with no area, it shouldn't show up)
-  encoding.json_path( true, true, JSON.stringify( [
+  sceneEncoding.json_path( true, true, JSON.stringify( [
     { type: 'MoveTo', x: 0, y: 0 },
     { type: 'LineTo', x: 1, y: 0 }
   ] ) );
 
-  const renderInfo = encoding.render( width, height, 0x666666ff );
+  const renderInfo = sceneEncoding.render( width, height, 0x666666ff );
 
   Object.keys( shaders ).forEach( shaderName => {
     const shader = shaders[ shaderName ];
@@ -452,6 +459,8 @@ init().then( async () => {
 
   const commandBuffer = encoder.finish();
   device.queue.submit( [ commandBuffer ] );
+
+  sceneEncoding.free();
 });
 
 // NOTE: Some render-path notes below:
