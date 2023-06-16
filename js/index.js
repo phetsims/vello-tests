@@ -65,7 +65,8 @@ init().then( async () => {
     { type: 'LineTo', x: -100, y: -100 },
     { type: 'Close' }
   ] ) );
-  encoding.color( 0xffffffff );
+  // encoding.color( 0xffffffff );
+  encoding.linear_gradient( -100, 0, 100, 0, 1, 0, new Float32Array( [ 0, 1 ] ), new Uint32Array( [ 0xff0000ff, 0x0000ffff ] ) );
 
   encoding.matrix( c, -s, s, c, 200, 300 );
   encoding.linewidth( -1 );
@@ -175,8 +176,11 @@ init().then( async () => {
   } );
 
   const sceneBytes = renderInfo.scene();
-  const layout = renderInfo.layout();
-  const configUniform = renderInfo.config_uniform();
+  const ramps = renderInfo.ramps();
+  const rampsWidth = renderInfo.ramps_width;
+  const rampsHeight = renderInfo.ramps_height;
+  // const layout = renderInfo.layout();
+  // const configUniform = renderInfo.config_uniform();
   const workgroupCounts = renderInfo.workgroup_counts();
   const bufferSizes = renderInfo.buffer_sizes();
   const configBytes = renderInfo.config_bytes();
@@ -362,21 +366,39 @@ init().then( async () => {
     dimension: '2d'
   } );
 
+  const hasRamps = rampsHeight > 0;
+  const gradientWidth = hasRamps ? rampsWidth : 1;
+  const gradientHeight = hasRamps ? rampsHeight : 1;
   const gradientImage = device.createTexture( {
     label: 'gradientImage',
     size: {
-      width: 1, // TODO: actual
-      height: 1, // TODO: actual
+      width: gradientWidth,
+      height: gradientHeight,
       depthOrArrayLayers: 1
     },
-    format: actualFormat,
+    format: 'rgba8unorm',
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
   } );
+
   const gradientImageView = gradientImage.createView( {
     label: 'gradientImageView',
-    format: actualFormat,
+    format: 'rgba8unorm',
     dimension: '2d'
   } );
+
+  if ( hasRamps ) {
+    const block_size = 4;
+    device.queue.writeTexture( {
+      texture: gradientImage
+    }, ramps.buffer, {
+      offset: 0,
+      bytesPerRow: rampsWidth * block_size
+    }, {
+      width: gradientWidth,
+      height: gradientHeight,
+      depthOrArrayLayers: 1
+    } );
+  }
 
   const atlasImage = device.createTexture( {
     label: 'atlasImage',
@@ -385,12 +407,12 @@ init().then( async () => {
       height: 1, // TODO: actual
       depthOrArrayLayers: 1
     },
-    format: actualFormat,
+    format: 'rgba8unorm',
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
   } );
   const atlasImageView = atlasImage.createView( {
     label: 'atlasImageView',
-    format: actualFormat,
+    format: 'rgba8unorm',
     dimension: '2d'
   } );
 

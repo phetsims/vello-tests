@@ -1,7 +1,7 @@
 use wasm_bindgen::prelude::*;
-use vello_encoding::{Encoding, Resolver, RenderConfig, DrawColor, Transform, Layout, ConfigUniform, BufferSize, WorkgroupCounts, WorkgroupSize, BufferSizes};
+use vello_encoding::{Encoding, Resolver, RenderConfig, DrawColor, DrawLinearGradient, Transform, Layout, ConfigUniform, BufferSize, WorkgroupCounts, WorkgroupSize, BufferSizes};
 use bytemuck;
-use peniko::kurbo;
+use peniko::{kurbo, Extend, ColorStop};
 
 // Install rust
 // Ensure we have wasm32 target with `rustup target add wasm32-unknown-unknown`
@@ -223,7 +223,10 @@ impl VelloBufferSizes {
 pub struct RenderInfo {
     scene: Vec<u8>,
     layout: Layout,
-    render_config: RenderConfig
+    render_config: RenderConfig,
+    ramps: Vec<u8>,
+    pub ramps_width: u32,
+    pub ramps_height: u32
 }
 
 #[wasm_bindgen]
@@ -231,6 +234,7 @@ impl RenderInfo {
     pub fn scene(&self) -> js_sys::Uint8Array {
         js_sys::Uint8Array::from(&self.scene[..])
     }
+    pub fn ramps(&self) -> js_sys::Uint8Array { js_sys::Uint8Array::from(&self.ramps[..]) }
     pub fn layout(&self) -> VelloLayout {
         VelloLayout::from_layout( self.layout )
     }
@@ -399,8 +403,24 @@ impl VelloEncoding {
     }
 
     pub fn color(&mut self, rgba: u32) {
-        self.encoding.encode_color( DrawColor {
-            rgba: rgba8_to_color(rgba).to_premul_u32() // Need premultiplied
+        self.encoding.encode_color( rgba8_to_draw_color( rgba ) );
+    }
+
+    pub fn linear_gradient(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, alpha: f32, extend: u8, offsets: js_sys::Float32Array, colors: js_sys::Uint32Array ) {
+        self.encoding.encode_linear_gradient( DrawLinearGradient {
+            index: 0,
+            p0: [ x1, y1 ],
+            p1: [ x2, y2 ]
+        }, offsets.to_vec().iter().zip( colors.to_vec().iter() ).map(|(offset, color)| {
+            ColorStop {
+                offset: *offset,
+                color: rgba8_to_color(*color)
+            }
+        }), alpha, match extend {
+            0 => Extend::Pad,
+            1 => Extend::Repeat,
+            2 => Extend::Reflect,
+            _ => panic!("Unknown extend mode")
         } );
     }
 
@@ -425,7 +445,10 @@ impl VelloEncoding {
         RenderInfo {
             scene: packed,
             layout,
-            render_config: cpu_config
+            render_config: cpu_config,
+            ramps: ( bytemuck::cast_slice(ramps.data) as &[u8] ).into(),
+            ramps_width: ramps.width,
+            ramps_height: ramps.height
         }
     }
 }
@@ -437,6 +460,12 @@ pub fn rgba8_to_color(rgba: u32) -> peniko::Color {
         (rgba >> 8) as u8,
         rgba as u8
     )
+}
+
+pub fn rgba8_to_draw_color(rgba: u32) -> DrawColor {
+    DrawColor {
+        rgba: rgba8_to_color(rgba).to_premul_u32() // Need premultiplied
+    }
 }
 
 #[wasm_bindgen(start)]
