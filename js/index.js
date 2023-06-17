@@ -21,7 +21,9 @@ init().then( async () => {
   const width = 512;
   const height = 512;
 
-  const adapter = await navigator.gpu?.requestAdapter();
+  const adapter = await navigator.gpu?.requestAdapter( {
+    powerPreference: 'high-performance'
+  } );
   const device = await adapter?.requestDevice( {
       requiredFeatures: [ 'bgra8unorm-storage' ]
   } );
@@ -194,14 +196,9 @@ init().then( async () => {
     } );
   } );
 
-  /***************************************************************************/
-  // Scene
-  /***************************************************************************/
+  // TODO: check for memory leaks
 
-  const sceneEncoding = VelloEncoding.new_scene();
-  const encoding = new VelloEncoding();
-
-  // An example image with a gradient
+  // An example image with a gradient (permanent, not freed)
   const demoImageWidth = 256;
   const demoImageHeight = 256;
   const demoImageData = new Uint8Array( demoImageWidth * demoImageHeight * 4 );
@@ -212,376 +209,413 @@ init().then( async () => {
   }
   const demoImage = addImage( demoImageWidth, demoImageHeight, demoImageData.buffer );
 
-  const angle = 0.3;
-  let c = Math.cos( angle );
-  let s = Math.sin( angle );
+  /***************************************************************************/
+  // Scene
+  /***************************************************************************/
 
-  encoding.matrix( c, -s, s, c, 200, 100 );
-  encoding.linewidth( -1 );
-  encoding.json_path( true, true, JSON.stringify( [
-    { type: 'MoveTo', x: -100, y: -100 },
-    { type: 'QuadTo', x1: 0, y1: 0, x2: 100, y2: -100 },
-    { type: 'LineTo', x: 100, y: 100 },
-    { type: 'CubicTo', x1: 0, y1: 200, x2: 0, y2: 0, x3: -100, y3: 100 },
-    { type: 'LineTo', x: -100, y: -100 },
-    { type: 'Close' }
-  ] ) );
-  encoding.linear_gradient( -100, 0, 100, 0, 1, 0, new Float32Array( [ 0, 1 ] ), new Uint32Array( [ 0xff0000ff, 0x0000ffff ] ) );
+  class SceneFrame {
+    constructor( sceneEncoding, dispose ) {
+      this.sceneEncoding = sceneEncoding;
+      this.dispose = dispose;
+    }
+  }
 
-  encoding.matrix( c, -s, s, c, 150, 200 );
-  encoding.linewidth( -1 );
-  encoding.svg_path( true, 'M 0 0 L 128 0 Q 256 0 256 128 L 256 256 L 128 256 Q 0 256 0 128 L 0 0 Z' );
-  encoding.image( demoImage, 1 );
+  const createSceneFrame = ( dt ) => {
 
-  encoding.matrix( c, -s, s, c, 200, 400 );
-  encoding.linewidth( -1 );
-  encoding.svg_path( true, 'M -100 -100 L 100 -100 L 0 100 L -100 100 L -100 -100 Z' );
-  encoding.radial_gradient( 0, 0, 0, 0, 20, 120, 1, 0, new Float32Array( [ 0, 1 ] ), new Uint32Array( [ 0x0000ffff, 0x00ff00ff ] ) );
+    const sceneEncoding = VelloEncoding.new_scene();
+    const encoding = new VelloEncoding();
 
-  // For a layer push: matrix, linewidth(-1), shape, begin_clip
-  encoding.matrix( 1, 0, 0, 1, 0, 0 );
-  encoding.linewidth( -1 );
-  // TODO: add rect() to avoid overhead
-  encoding.svg_path( true, 'M 0 0 L 512 0 L 256 256 L 0 512 Z' );
-  encoding.begin_clip( VelloMix.Clip, VelloCompose.SrcOver, 0.5 ); // TODO: alpha 0.5 on clip layer fails EXCEPT on fine tiles where it ends
+    const angle = Date.now() / 1000;
+    let c = Math.cos( angle );
+    let s = Math.sin( angle );
 
-  encoding.matrix( 3, 0, 0, 3, 50, 150 );
-  encoding.linewidth( -1 );
-  encoding.svg_path( true, 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' );
-  encoding.color( 0xff00ff66 );
+    encoding.matrix( c, -s, s, c, 200, 100 );
+    encoding.linewidth( -1 );
+    encoding.json_path( true, true, JSON.stringify( [
+      { type: 'MoveTo', x: -100, y: -100 },
+      { type: 'QuadTo', x1: 0, y1: 0, x2: 100, y2: -100 },
+      { type: 'LineTo', x: 100, y: 100 },
+      { type: 'CubicTo', x1: 0, y1: 200, x2: 0, y2: 0, x3: -100, y3: 100 },
+      { type: 'LineTo', x: -100, y: -100 },
+      { type: 'Close' }
+    ] ) );
+    encoding.linear_gradient( -100, 0, 100, 0, 1, 0, new Float32Array( [ 0, 1 ] ), new Uint32Array( [ 0xff0000ff, 0x0000ffff ] ) );
 
-  encoding.matrix( 3, 0, 0, 3, 50, 150 );
-  encoding.linewidth( 1 );
-  encoding.svg_path( false, 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' );
-  encoding.color( 0x000000ff );
+    encoding.matrix( c, -s, s, c, 150, 200 );
+    encoding.linewidth( -1 );
+    encoding.svg_path( true, 'M 0 0 L 128 0 Q 256 0 256 128 L 256 256 L 128 256 Q 0 256 0 128 L 0 0 Z' );
+    encoding.image( demoImage, 1 );
 
-  encoding.end_clip();
+    encoding.matrix( c, -s, s, c, 200, 400 );
+    encoding.linewidth( -1 );
+    encoding.svg_path( true, 'M -100 -100 L 100 -100 L 0 100 L -100 100 L -100 -100 Z' );
+    encoding.radial_gradient( 0, 0, 0, 0, 20, 120, 1, 0, new Float32Array( [ 0, 1 ] ), new Uint32Array( [ 0x0000ffff, 0x00ff00ff ] ) );
 
-  encoding.append_with_transform( getTextEncoding( 'How is this text? No hints!', shaping.Direction.LTR ), 40, 0, 0, 40, 5, 400 );
+    // For a layer push: matrix, linewidth(-1), shape, begin_clip
+    encoding.matrix( 1, 0, 0, 1, 0, 0 );
+    encoding.linewidth( -1 );
+    // TODO: add rect() to avoid overhead
+    encoding.svg_path( true, 'M 0 0 L 512 0 L 256 256 L 0 512 Z' );
+    encoding.begin_clip( VelloMix.Clip, VelloCompose.SrcOver, 0.5 ); // TODO: alpha 0.5 on clip layer fails EXCEPT on fine tiles where it ends
 
-  sceneEncoding.append( encoding );
-  sceneEncoding.append_with_transform( encoding, 0.4, 0, 0, 0.4, Math.floor( 512 * ( 1 - 0.4 ) ) + 20, 0 );
+    encoding.matrix( 3, 0, 0, 3, 50, 150 );
+    encoding.linewidth( -1 );
+    encoding.svg_path( true, 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' );
+    encoding.color( 0xff00ff66 );
 
-  encoding.free();
+    encoding.matrix( 3, 0, 0, 3, 50, 150 );
+    encoding.linewidth( 1 );
+    encoding.svg_path( false, 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' );
+    encoding.color( 0x000000ff );
 
-  sceneEncoding.finalize_scene();
+    encoding.end_clip();
+
+    const textScale = 40 + 10 * Math.sin( Date.now() / 1000 );
+    encoding.append_with_transform( getTextEncoding( 'How is this text? No hints!', shaping.Direction.LTR ), textScale, 0, 0, textScale, 5, 400 );
+
+    sceneEncoding.append( encoding );
+    sceneEncoding.append_with_transform( encoding, 0.4, 0, 0, 0.4, Math.floor( 512 * ( 1 - 0.4 ) ) + 20, 0 );
+
+    encoding.free();
+
+    sceneEncoding.finalize_scene();
+
+    return new SceneFrame( sceneEncoding, () => {
+      sceneEncoding.free();
+    } )
+  };
+
 
   /***************************************************************************/
   // Render
   /***************************************************************************/
 
-  const renderInfo = sceneEncoding.render( width, height, 0x666666ff );
+  const render = ( sceneFrame, outTexture ) => {
+    const renderInfo = sceneFrame.sceneEncoding.render( width, height, 0x666666ff );
 
-  const sceneBytes = renderInfo.scene();
+    const sceneBytes = renderInfo.scene();
 
-  const ramps = renderInfo.ramps();
-  const rampsWidth = renderInfo.ramps_width;
-  const rampsHeight = renderInfo.ramps_height;
-  const hasRamps = rampsHeight > 0;
+    const ramps = renderInfo.ramps();
+    const rampsWidth = renderInfo.ramps_width;
+    const rampsHeight = renderInfo.ramps_height;
+    const hasRamps = rampsHeight > 0;
 
-  const images = renderInfo.images();
-  const imagesWidth = renderInfo.images_width;
-  const imagesHeight = renderInfo.images_height;
-  const hasImages = images.length > 0;
+    const images = renderInfo.images();
+    const imagesWidth = renderInfo.images_width;
+    const imagesHeight = renderInfo.images_height;
+    const hasImages = images.length > 0;
 
-  const workgroupCounts = renderInfo.workgroup_counts();
-  const bufferSizes = renderInfo.buffer_sizes();
-  const configBytes = renderInfo.config_bytes();
-  console.log( `use_large_path_scan: ${workgroupCounts.use_large_path_scan}` );
+    const workgroupCounts = renderInfo.workgroup_counts();
+    const bufferSizes = renderInfo.buffer_sizes();
+    const configBytes = renderInfo.config_bytes();
 
-  const bufferPool = new BufferPool( device );
+    const bufferPool = new BufferPool( device );
 
-  const sceneBuffer = bufferPool.getBuffer( sceneBytes.byteLength, 'scene buffer' );
-  device.queue.writeBuffer( sceneBuffer, 0, sceneBytes.buffer );
+    const sceneBuffer = bufferPool.getBuffer( sceneBytes.byteLength, 'scene buffer' );
+    device.queue.writeBuffer( sceneBuffer, 0, sceneBytes.buffer );
 
-  const configBuffer = device.createBuffer( {
-    label: 'config buffer',
-    size: configBytes.byteLength,
-    // Different than the typical buffer from BufferPool, we'll create it here and manually destroy it
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-  } );
-  device.queue.writeBuffer( configBuffer, 0, configBytes.buffer );
-
-  const infoBinDataBuffer = bufferPool.getBuffer( bufferSizes.bin_data.size_in_bytes, 'info_bin_data buffer' );
-  const tileBuffer = bufferPool.getBuffer( bufferSizes.tiles.size_in_bytes, 'tile buffer' );
-  const segmentsBuffer = bufferPool.getBuffer( bufferSizes.segments.size_in_bytes, 'segments buffer' );
-  const ptclBuffer = bufferPool.getBuffer( bufferSizes.ptcl.size_in_bytes, 'ptcl buffer' );
-  const reducedBuffer = bufferPool.getBuffer( bufferSizes.path_reduced.size_in_bytes, 'reduced buffer' );
-
-  // TODO: rename, buffer could be GPUTextureView also
-  const buffersToEntries = buffers => buffers.map( ( buffer, i ) => ( {
-    binding: i,
-    // handle GPUTextureView
-    resource: buffer instanceof GPUBuffer ? { buffer: buffer } : buffer
-  } ) );
-
-  const encoder = device.createCommandEncoder( {
-    label: 'the encoder',
-  } );
-
-  const dispatch = ( shaderName, internalShaderName, wg_counts, buffers ) => {
-    const shader = shaders[ internalShaderName ];
-    const bindGroup = device.createBindGroup( {
-      label: `${shaderName} bindGroup`,
-      layout: shader.bindGroupLayout,
-      entries: buffersToEntries( buffers )
+    const configBuffer = device.createBuffer( {
+      label: 'config buffer',
+      size: configBytes.byteLength,
+      // Different than the typical buffer from BufferPool, we'll create it here and manually destroy it
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     } );
-    const computePass = encoder.beginComputePass( {
-      label: `${shaderName} compute pass`
+    device.queue.writeBuffer( configBuffer, 0, configBytes.buffer );
+
+    const infoBinDataBuffer = bufferPool.getBuffer( bufferSizes.bin_data.size_in_bytes, 'info_bin_data buffer' );
+    const tileBuffer = bufferPool.getBuffer( bufferSizes.tiles.size_in_bytes, 'tile buffer' );
+    const segmentsBuffer = bufferPool.getBuffer( bufferSizes.segments.size_in_bytes, 'segments buffer' );
+    const ptclBuffer = bufferPool.getBuffer( bufferSizes.ptcl.size_in_bytes, 'ptcl buffer' );
+    const reducedBuffer = bufferPool.getBuffer( bufferSizes.path_reduced.size_in_bytes, 'reduced buffer' );
+
+    // TODO: rename, buffer could be GPUTextureView also
+    const buffersToEntries = buffers => buffers.map( ( buffer, i ) => ( {
+      binding: i,
+      // handle GPUTextureView
+      resource: buffer instanceof GPUBuffer ? { buffer: buffer } : buffer
+    } ) );
+
+    const encoder = device.createCommandEncoder( {
+      label: 'the encoder',
     } );
-    computePass.setPipeline( shader.pipeline );
-    computePass.setBindGroup( 0, bindGroup );
-    computePass.dispatchWorkgroups( wg_counts.x, wg_counts.y, wg_counts.z );
-    computePass.end(); // TODO: does this mess stuff up?
-  };
 
-  dispatch( 'pathtag_reduce', 'pathtag_reduce', workgroupCounts.path_reduce, [ configBuffer, sceneBuffer, reducedBuffer ] );
+    const dispatch = ( shaderName, internalShaderName, wg_counts, buffers ) => {
+      const shader = shaders[ internalShaderName ];
+      const bindGroup = device.createBindGroup( {
+        label: `${shaderName} bindGroup`,
+        layout: shader.bindGroupLayout,
+        entries: buffersToEntries( buffers )
+      } );
+      const computePass = encoder.beginComputePass( {
+        label: `${shaderName} compute pass`
+      } );
+      computePass.setPipeline( shader.pipeline );
+      computePass.setBindGroup( 0, bindGroup );
+      computePass.dispatchWorkgroups( wg_counts.x, wg_counts.y, wg_counts.z );
+      computePass.end(); // TODO: does this mess stuff up?
+    };
 
-  let pathtag_parent = reducedBuffer;
+    dispatch( 'pathtag_reduce', 'pathtag_reduce', workgroupCounts.path_reduce, [ configBuffer, sceneBuffer, reducedBuffer ] );
 
-  let reduced2Buffer;
-  let reducedScanBuffer;
-  if ( workgroupCounts.use_large_path_scan ) {
-    reduced2Buffer = bufferPool.getBuffer( bufferSizes.path_reduced2.size_in_bytes, 'reduced2 buffer' );
+    let pathtag_parent = reducedBuffer;
 
-    dispatch( 'pathtag_reduce2', 'pathtag_reduce2', workgroupCounts.path_reduce2, [ reducedBuffer, reduced2Buffer ] );
+    let reduced2Buffer;
+    let reducedScanBuffer;
+    if ( workgroupCounts.use_large_path_scan ) {
+      reduced2Buffer = bufferPool.getBuffer( bufferSizes.path_reduced2.size_in_bytes, 'reduced2 buffer' );
 
-    reducedScanBuffer = bufferPool.getBuffer( bufferSizes.path_reduced_scan.size_in_bytes, 'reducedScan buffer' );
+      dispatch( 'pathtag_reduce2', 'pathtag_reduce2', workgroupCounts.path_reduce2, [ reducedBuffer, reduced2Buffer ] );
 
-    dispatch( 'pathtag_scan1', 'pathtag_scan1', workgroupCounts.path_scan1, [ reducedBuffer, reduced2Buffer, reducedScanBuffer ] );
+      reducedScanBuffer = bufferPool.getBuffer( bufferSizes.path_reduced_scan.size_in_bytes, 'reducedScan buffer' );
 
-    pathtag_parent = reducedScanBuffer;
-  }
+      dispatch( 'pathtag_scan1', 'pathtag_scan1', workgroupCounts.path_scan1, [ reducedBuffer, reduced2Buffer, reducedScanBuffer ] );
 
-  const tagmonoidBuffer = bufferPool.getBuffer( bufferSizes.path_monoids.size_in_bytes, 'tagmonoid buffer' );
+      pathtag_parent = reducedScanBuffer;
+    }
 
-  if ( workgroupCounts.use_large_path_scan ) {
-    dispatch( 'pathtag_scan', 'pathtag_scan_large', workgroupCounts.path_scan, [ configBuffer, sceneBuffer, pathtag_parent, tagmonoidBuffer ] );
-  }
-  else {
-    dispatch( 'pathtag_scan', 'pathtag_scan_small', workgroupCounts.path_scan, [ configBuffer, sceneBuffer, pathtag_parent, tagmonoidBuffer ] );
-  }
+    const tagmonoidBuffer = bufferPool.getBuffer( bufferSizes.path_monoids.size_in_bytes, 'tagmonoid buffer' );
 
-  bufferPool.freeBuffer( reducedBuffer );
-  reduced2Buffer && bufferPool.freeBuffer( reduced2Buffer );
-  reducedScanBuffer && bufferPool.freeBuffer( reducedScanBuffer );
+    if ( workgroupCounts.use_large_path_scan ) {
+      dispatch( 'pathtag_scan', 'pathtag_scan_large', workgroupCounts.path_scan, [ configBuffer, sceneBuffer, pathtag_parent, tagmonoidBuffer ] );
+    }
+    else {
+      dispatch( 'pathtag_scan', 'pathtag_scan_small', workgroupCounts.path_scan, [ configBuffer, sceneBuffer, pathtag_parent, tagmonoidBuffer ] );
+    }
 
-  const pathBBoxBuffer = bufferPool.getBuffer( bufferSizes.path_bboxes.size_in_bytes, 'pathBBox buffer' );
-  dispatch( 'bbox_clear', 'bbox_clear', workgroupCounts.bbox_clear, [ configBuffer, pathBBoxBuffer ] );
+    bufferPool.freeBuffer( reducedBuffer );
+    reduced2Buffer && bufferPool.freeBuffer( reduced2Buffer );
+    reducedScanBuffer && bufferPool.freeBuffer( reducedScanBuffer );
 
-  const cubicBuffer = bufferPool.getBuffer( bufferSizes.cubics.size_in_bytes, 'cubic buffer' );
+    const pathBBoxBuffer = bufferPool.getBuffer( bufferSizes.path_bboxes.size_in_bytes, 'pathBBox buffer' );
+    dispatch( 'bbox_clear', 'bbox_clear', workgroupCounts.bbox_clear, [ configBuffer, pathBBoxBuffer ] );
 
-  dispatch( 'pathseg', 'pathseg', workgroupCounts.path_seg, [ configBuffer, sceneBuffer, tagmonoidBuffer, pathBBoxBuffer, cubicBuffer ] );
+    const cubicBuffer = bufferPool.getBuffer( bufferSizes.cubics.size_in_bytes, 'cubic buffer' );
 
-  const drawReducedBuffer = bufferPool.getBuffer( bufferSizes.draw_reduced.size_in_bytes, 'drawReduced buffer' );
+    dispatch( 'pathseg', 'pathseg', workgroupCounts.path_seg, [ configBuffer, sceneBuffer, tagmonoidBuffer, pathBBoxBuffer, cubicBuffer ] );
 
-  dispatch( 'draw_reduce', 'draw_reduce', workgroupCounts.draw_reduce, [ configBuffer, sceneBuffer, drawReducedBuffer ] );
+    const drawReducedBuffer = bufferPool.getBuffer( bufferSizes.draw_reduced.size_in_bytes, 'drawReduced buffer' );
 
-  const drawMonoidBuffer = bufferPool.getBuffer( bufferSizes.draw_monoids.size_in_bytes, 'drawMonoid buffer' );
-  const clipInpBuffer = bufferPool.getBuffer( bufferSizes.clip_inps.size_in_bytes, 'clipInp buffer' );
+    dispatch( 'draw_reduce', 'draw_reduce', workgroupCounts.draw_reduce, [ configBuffer, sceneBuffer, drawReducedBuffer ] );
 
-  dispatch( 'draw_leaf', 'draw_leaf', workgroupCounts.draw_leaf, [ configBuffer, sceneBuffer, drawReducedBuffer, pathBBoxBuffer, drawMonoidBuffer, infoBinDataBuffer, clipInpBuffer ] );
+    const drawMonoidBuffer = bufferPool.getBuffer( bufferSizes.draw_monoids.size_in_bytes, 'drawMonoid buffer' );
+    const clipInpBuffer = bufferPool.getBuffer( bufferSizes.clip_inps.size_in_bytes, 'clipInp buffer' );
 
-  bufferPool.freeBuffer( drawReducedBuffer );
+    dispatch( 'draw_leaf', 'draw_leaf', workgroupCounts.draw_leaf, [ configBuffer, sceneBuffer, drawReducedBuffer, pathBBoxBuffer, drawMonoidBuffer, infoBinDataBuffer, clipInpBuffer ] );
 
-  const clipElBuffer = bufferPool.getBuffer( bufferSizes.clip_els.size_in_bytes, 'clipEl buffer' );
-  const clipBicBuffer = bufferPool.getBuffer( bufferSizes.clip_bics.size_in_bytes, 'clipBic buffer' );
+    bufferPool.freeBuffer( drawReducedBuffer );
 
-  if ( workgroupCounts.clip_reduce.x > 0 ) {
-    dispatch( 'clip_reduce', 'clip_reduce', workgroupCounts.clip_reduce, [ configBuffer, clipInpBuffer, pathBBoxBuffer, clipBicBuffer, clipElBuffer ] );
-  }
+    const clipElBuffer = bufferPool.getBuffer( bufferSizes.clip_els.size_in_bytes, 'clipEl buffer' );
+    const clipBicBuffer = bufferPool.getBuffer( bufferSizes.clip_bics.size_in_bytes, 'clipBic buffer' );
 
-  const clipBBoxBuffer = bufferPool.getBuffer( bufferSizes.clip_bboxes.size_in_bytes, 'clipBBox buffer' );
+    if ( workgroupCounts.clip_reduce.x > 0 ) {
+      dispatch( 'clip_reduce', 'clip_reduce', workgroupCounts.clip_reduce, [ configBuffer, clipInpBuffer, pathBBoxBuffer, clipBicBuffer, clipElBuffer ] );
+    }
 
-  if ( workgroupCounts.clip_leaf.x > 0 ) {
-    dispatch( 'clip_leaf', 'clip_leaf', workgroupCounts.clip_leaf, [ configBuffer, clipInpBuffer, pathBBoxBuffer, clipBicBuffer, clipElBuffer, drawMonoidBuffer, clipBBoxBuffer ] );
-  }
+    const clipBBoxBuffer = bufferPool.getBuffer( bufferSizes.clip_bboxes.size_in_bytes, 'clipBBox buffer' );
 
-  bufferPool.freeBuffer( clipInpBuffer );
-  bufferPool.freeBuffer( clipBicBuffer );
-  bufferPool.freeBuffer( clipElBuffer );
+    if ( workgroupCounts.clip_leaf.x > 0 ) {
+      dispatch( 'clip_leaf', 'clip_leaf', workgroupCounts.clip_leaf, [ configBuffer, clipInpBuffer, pathBBoxBuffer, clipBicBuffer, clipElBuffer, drawMonoidBuffer, clipBBoxBuffer ] );
+    }
 
-  const drawBBoxBuffer = bufferPool.getBuffer( bufferSizes.draw_bboxes.size_in_bytes, 'drawBBox buffer' );
-  const bumpBuffer = bufferPool.getBuffer( bufferSizes.bump_alloc.size_in_bytes, 'bump buffer' );
-  const binHeaderBuffer = bufferPool.getBuffer( bufferSizes.bin_headers.size_in_bytes, 'binHeader buffer' );
+    bufferPool.freeBuffer( clipInpBuffer );
+    bufferPool.freeBuffer( clipBicBuffer );
+    bufferPool.freeBuffer( clipElBuffer );
 
-  // TODO: wgpu might not have this implemented? Do I need a manual clear?
-  // TODO: actually, we're not reusing the buffer, so it might be zero'ed out? Check spec
-  // TODO: See if this clearBuffer is insufficient (implied by engine.rs docs)
-  encoder.clearBuffer( bumpBuffer, 0 );
-  // device.queue.writeBuffer( bumpBuffer, 0, new Uint8Array( bumpBuffer.size ) );
+    const drawBBoxBuffer = bufferPool.getBuffer( bufferSizes.draw_bboxes.size_in_bytes, 'drawBBox buffer' );
+    const bumpBuffer = bufferPool.getBuffer( bufferSizes.bump_alloc.size_in_bytes, 'bump buffer' );
+    const binHeaderBuffer = bufferPool.getBuffer( bufferSizes.bin_headers.size_in_bytes, 'binHeader buffer' );
 
-  dispatch( 'binning', 'binning', workgroupCounts.binning, [ configBuffer, drawMonoidBuffer, pathBBoxBuffer, clipBBoxBuffer, drawBBoxBuffer, bumpBuffer, infoBinDataBuffer, binHeaderBuffer ] );
+    // TODO: wgpu might not have this implemented? Do I need a manual clear?
+    // TODO: actually, we're not reusing the buffer, so it might be zero'ed out? Check spec
+    // TODO: See if this clearBuffer is insufficient (implied by engine.rs docs)
+    encoder.clearBuffer( bumpBuffer, 0 );
+    // device.queue.writeBuffer( bumpBuffer, 0, new Uint8Array( bumpBuffer.size ) );
 
-  bufferPool.freeBuffer( drawMonoidBuffer );
-  bufferPool.freeBuffer( pathBBoxBuffer );
-  bufferPool.freeBuffer( clipBBoxBuffer );
+    dispatch( 'binning', 'binning', workgroupCounts.binning, [ configBuffer, drawMonoidBuffer, pathBBoxBuffer, clipBBoxBuffer, drawBBoxBuffer, bumpBuffer, infoBinDataBuffer, binHeaderBuffer ] );
 
-  // Note: this only needs to be rounded up because of the workaround to store the tile_offset
-  // in storage rather than workgroup memory.
-  const pathBuffer = bufferPool.getBuffer( bufferSizes.paths.size_in_bytes, 'path buffer' );
+    bufferPool.freeBuffer( drawMonoidBuffer );
+    bufferPool.freeBuffer( pathBBoxBuffer );
+    bufferPool.freeBuffer( clipBBoxBuffer );
 
-  dispatch( 'tile_alloc', 'tile_alloc', workgroupCounts.tile_alloc, [ configBuffer, sceneBuffer, drawBBoxBuffer, bumpBuffer, pathBuffer, tileBuffer ] );
+    // Note: this only needs to be rounded up because of the workaround to store the tile_offset
+    // in storage rather than workgroup memory.
+    const pathBuffer = bufferPool.getBuffer( bufferSizes.paths.size_in_bytes, 'path buffer' );
 
-  bufferPool.freeBuffer( drawBBoxBuffer );
+    dispatch( 'tile_alloc', 'tile_alloc', workgroupCounts.tile_alloc, [ configBuffer, sceneBuffer, drawBBoxBuffer, bumpBuffer, pathBuffer, tileBuffer ] );
 
-  dispatch( 'path_coarse', 'path_coarse_full', workgroupCounts.path_coarse, [ configBuffer, sceneBuffer, tagmonoidBuffer, cubicBuffer, pathBuffer, bumpBuffer, tileBuffer, segmentsBuffer ] );
+    bufferPool.freeBuffer( drawBBoxBuffer );
 
-  bufferPool.freeBuffer( tagmonoidBuffer );
-  bufferPool.freeBuffer( cubicBuffer );
+    dispatch( 'path_coarse', 'path_coarse_full', workgroupCounts.path_coarse, [ configBuffer, sceneBuffer, tagmonoidBuffer, cubicBuffer, pathBuffer, bumpBuffer, tileBuffer, segmentsBuffer ] );
 
-  dispatch( 'backdrop', 'backdrop_dyn', workgroupCounts.backdrop, [ configBuffer, pathBuffer, tileBuffer ] );
+    bufferPool.freeBuffer( tagmonoidBuffer );
+    bufferPool.freeBuffer( cubicBuffer );
 
-  dispatch( 'coarse', 'coarse', workgroupCounts.coarse, [ configBuffer, sceneBuffer, drawMonoidBuffer, binHeaderBuffer, infoBinDataBuffer, pathBuffer, tileBuffer, bumpBuffer, ptclBuffer ] );
+    dispatch( 'backdrop', 'backdrop_dyn', workgroupCounts.backdrop, [ configBuffer, pathBuffer, tileBuffer ] );
 
-  // TODO: Check frees on all buffers. Note the config buffer (manually destroy that, or can we reuse it?)
-  bufferPool.freeBuffer( sceneBuffer );
-  bufferPool.freeBuffer( drawMonoidBuffer );
-  bufferPool.freeBuffer( binHeaderBuffer );
-  bufferPool.freeBuffer( pathBuffer );
-  bufferPool.freeBuffer( bumpBuffer );
+    dispatch( 'coarse', 'coarse', workgroupCounts.coarse, [ configBuffer, sceneBuffer, drawMonoidBuffer, binHeaderBuffer, infoBinDataBuffer, pathBuffer, tileBuffer, bumpBuffer, ptclBuffer ] );
 
-  // let out_image = ImageProxy::new(params.width, params.height, ImageFormat::Rgba8);
-  //
-  // // NOTE: not apparently using robust for wasm?
-      // Note: in the wasm case, we're currently not running the robust
-      // pipeline, as it requires more async wiring for the readback.
-  // if robust {
-  //     recording.download(*bump_buf.as_buf().unwrap());
-  // }
+    // TODO: Check frees on all buffers. Note the config buffer (manually destroy that, or can we reuse it?)
+    bufferPool.freeBuffer( sceneBuffer );
+    bufferPool.freeBuffer( drawMonoidBuffer );
+    bufferPool.freeBuffer( binHeaderBuffer );
+    bufferPool.freeBuffer( pathBuffer );
+    bufferPool.freeBuffer( bumpBuffer );
 
-  // const outImage = device.createTexture( {
-  //   label: 'outImage',
-  //   size: {
-  //     width: width,
-  //     height: height,
-  //     depthOrArrayLayers: 1
-  //   },
-  //   format: actualFormat,
-  //   // TODO: wtf, usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-  //   usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.STORAGE_BINDING
-  // } );
-  // const outImageView = outImage.createView( {
-  //   label: 'outImageView',
-  //   format: actualFormat,
-  //   dimension: '2d'
-  // } );
+    // let out_image = ImageProxy::new(params.width, params.height, ImageFormat::Rgba8);
+    //
+    // // NOTE: not apparently using robust for wasm?
+        // Note: in the wasm case, we're currently not running the robust
+        // pipeline, as it requires more async wiring for the readback.
+    // if robust {
+    //     recording.download(*bump_buf.as_buf().unwrap());
+    // }
 
-  const gradientWidth = hasRamps ? rampsWidth : 1;
-  const gradientHeight = hasRamps ? rampsHeight : 1;
-  const gradientImage = device.createTexture( {
-    label: 'gradientImage',
-    size: {
-      width: gradientWidth,
-      height: gradientHeight,
-      depthOrArrayLayers: 1
-    },
-    format: 'rgba8unorm',
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
-  } );
+    // const outImage = device.createTexture( {
+    //   label: 'outImage',
+    //   size: {
+    //     width: width,
+    //     height: height,
+    //     depthOrArrayLayers: 1
+    //   },
+    //   format: actualFormat,
+    //   // TODO: wtf, usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+    //   usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.STORAGE_BINDING
+    // } );
+    // const outImageView = outImage.createView( {
+    //   label: 'outImageView',
+    //   format: actualFormat,
+    //   dimension: '2d'
+    // } );
 
-  const gradientImageView = gradientImage.createView( {
-    label: 'gradientImageView',
-    format: 'rgba8unorm',
-    dimension: '2d'
-  } );
-
-  if ( hasRamps ) {
-    const block_size = 4;
-    device.queue.writeTexture( {
-      texture: gradientImage
-    }, ramps.buffer, {
-      offset: 0,
-      bytesPerRow: rampsWidth * block_size
-    }, {
-      width: gradientWidth,
-      height: gradientHeight,
-      depthOrArrayLayers: 1
+    const gradientWidth = hasRamps ? rampsWidth : 1;
+    const gradientHeight = hasRamps ? rampsHeight : 1;
+    const gradientImage = device.createTexture( {
+      label: 'gradientImage',
+      size: {
+        width: gradientWidth,
+        height: gradientHeight,
+        depthOrArrayLayers: 1
+      },
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
     } );
-  }
 
-  // TODO: Do we have "repeat" on images also? Think repeating patterns! Also alpha
-  const atlasWidth = hasImages ? imagesWidth : 1;
-  const atlasHeight = hasImages ? imagesHeight : 1;
-  const atlasImage = device.createTexture( {
-    label: 'atlasImage',
-    size: {
-      width: atlasWidth,
-      height: atlasHeight,
-      depthOrArrayLayers: 1
-    },
-    format: 'rgba8unorm',
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
-  } );
-  const atlasImageView = atlasImage.createView( {
-    label: 'atlasImageView',
-    format: 'rgba8unorm',
-    dimension: '2d'
-  } );
+    const gradientImageView = gradientImage.createView( {
+      label: 'gradientImageView',
+      format: 'rgba8unorm',
+      dimension: '2d'
+    } );
 
-  if ( hasImages ) {
-    for ( let i = 0; i < images.length; i += 3 ) {
-      const id = images[ i ];
-      const x = Number( images[ i + 1 ] );
-      const y = Number( images[ i + 2 ] );
+    if ( hasRamps ) {
+      const block_size = 4;
+      device.queue.writeTexture( {
+        texture: gradientImage
+      }, ramps.buffer, {
+        offset: 0,
+        bytesPerRow: rampsWidth * block_size
+      }, {
+        width: gradientWidth,
+        height: gradientHeight,
+        depthOrArrayLayers: 1
+      } );
+    }
 
-      const entry = imageMap[ id ];
+    // TODO: Do we have "repeat" on images also? Think repeating patterns! Also alpha
+    const atlasWidth = hasImages ? imagesWidth : 1;
+    const atlasHeight = hasImages ? imagesHeight : 1;
+    const atlasImage = device.createTexture( {
+      label: 'atlasImage',
+      size: {
+        width: atlasWidth,
+        height: atlasHeight,
+        depthOrArrayLayers: 1
+      },
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+    } );
+    const atlasImageView = atlasImage.createView( {
+      label: 'atlasImageView',
+      format: 'rgba8unorm',
+      dimension: '2d'
+    } );
 
-      if ( entry ) {
-        const block_size = 4;
+    if ( hasImages ) {
+      for ( let i = 0; i < images.length; i += 3 ) {
+        const id = images[ i ];
+        const x = Number( images[ i + 1 ] );
+        const y = Number( images[ i + 2 ] );
 
-        device.queue.writeTexture( {
-          texture: atlasImage,
-          origin: { x, y, z: 0 }
-        }, entry.buffer, {
-          offset: 0,
-          bytesPerRow: entry.width * block_size
-        }, {
-          width: entry.width,
-          height: entry.height,
-          depthOrArrayLayers: 1
-        } );
-      }
-      else {
-        throw new Error( 'missing image' );
+        const entry = imageMap[ id ];
+
+        if ( entry ) {
+          const block_size = 4;
+
+          device.queue.writeTexture( {
+            texture: atlasImage,
+            origin: { x, y, z: 0 }
+          }, entry.buffer, {
+            offset: 0,
+            bytesPerRow: entry.width * block_size
+          }, {
+            width: entry.width,
+            height: entry.height,
+            depthOrArrayLayers: 1
+          } );
+        }
+        else {
+          throw new Error( 'missing image' );
+        }
       }
     }
-  }
 
-  const canvasOutView = context.getCurrentTexture().createView();
+    dispatch( 'fine', 'fine', workgroupCounts.fine, [ configBuffer, tileBuffer, segmentsBuffer, outTexture.createView(), ptclBuffer, gradientImageView, infoBinDataBuffer, atlasImageView ] );
 
-  dispatch( 'fine', 'fine', workgroupCounts.fine, [ configBuffer, tileBuffer, segmentsBuffer, canvasOutView, ptclBuffer, gradientImageView, infoBinDataBuffer, atlasImageView ] );
+    // NOTE: bgra8unorm vs rgba8unorm can't be copied, so this depends on the platform?
+    // encoder.copyTextureToTexture( {
+    //   texture: outImage
+    // }, {
+    //   texture: context.getCurrentTexture()
+    // }, {
+    //   width: width,
+    //   height: height,
+    //   depthOrArrayLayers: 1
+    // } );
 
-  // NOTE: bgra8unorm vs rgba8unorm can't be copied, so this depends on the platform?
-  // encoder.copyTextureToTexture( {
-  //   texture: outImage
-  // }, {
-  //   texture: context.getCurrentTexture()
-  // }, {
-  //   width: width,
-  //   height: height,
-  //   depthOrArrayLayers: 1
-  // } );
+    // TODO: are these early frees acceptable? Are we going to badly reuse things?
+    bufferPool.freeBuffer( tileBuffer );
+    bufferPool.freeBuffer( segmentsBuffer );
+    bufferPool.freeBuffer( ptclBuffer );
+    bufferPool.freeBuffer( infoBinDataBuffer );
 
-  // TODO: are these early frees acceptable? Are we going to badly reuse things?
-  bufferPool.freeBuffer( tileBuffer );
-  bufferPool.freeBuffer( segmentsBuffer );
-  bufferPool.freeBuffer( ptclBuffer );
-  bufferPool.freeBuffer( infoBinDataBuffer );
+    // TODO: free images?
 
-  // TODO: free images?
+    const commandBuffer = encoder.finish();
+    device.queue.submit( [ commandBuffer ] );
 
-  const commandBuffer = encoder.finish();
-  device.queue.submit( [ commandBuffer ] );
+    // for now TODO: can we reuse? Likely get some from reusing these
+    configBuffer.destroy();
+    gradientImage.destroy();
+    atlasImage.destroy();
 
-  // for now TODO: can we reuse? Likely get some from reusing these
-  configBuffer.destroy();
-  gradientImage.destroy();
-  atlasImage.destroy();
+    bufferPool.nextGeneration();
+    renderInfo.free();
+  };
 
-  sceneEncoding.free();
-  demoImage.free();
+  // keep track of how much time elapsed over the last frame
+  let lastTime = 0;
+  let timeElapsedInSeconds = 0;
+  ( function step() {
+    window.requestAnimationFrame( step, canvas );
 
-  bufferPool.nextGeneration();
-  renderInfo.free();
+    // calculate how much time has elapsed since we rendered the last frame
+    const timeNow = Date.now();
+    if ( lastTime !== 0 ) {
+      timeElapsedInSeconds = ( timeNow - lastTime ) / 1000.0;
+    }
+    lastTime = timeNow;
+
+    const sceneFrame = createSceneFrame( timeElapsedInSeconds );
+    render( sceneFrame, context.getCurrentTexture() );
+    sceneFrame.dispose();
+  } )();
 });
