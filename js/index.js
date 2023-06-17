@@ -217,6 +217,7 @@ init().then( async () => {
 
     sceneEncoding.finalize_scene();
 
+    // TODO: scaling based on devicePixelRatio
     return new SceneFrame( sceneEncoding, () => {
       sceneEncoding.free();
     } )
