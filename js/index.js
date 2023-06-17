@@ -54,10 +54,6 @@ init().then( async () => {
     if ( glyphEncodingMap[ font ][ index ] === undefined ) {
       const glyph = shaping.getGlyph( font, index );
 
-      console.log( glyph.bounds );
-
-      console.log( font, index );
-
       const svgPathData = glyph.getSVGPath();
       if ( svgPathData ) {
         const encoding = new VelloEncoding();
