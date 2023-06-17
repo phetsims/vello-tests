@@ -2,6 +2,19 @@
 import shaderCreator from "./shaders.js";
 import { default as init, VelloEncoding, VelloMix, VelloCompose } from "../pkg/vello_tests.js";
 
+// Workaround for old namespacing
+window.kite = phet.kite;
+
+// TODO: newer harfbuzz. or cosmic-text might be nice
+const notoSerif = shaping.createBase64FontHandle( notoSerifRegularBase64 );
+const scriptData = {};
+scriptData.default = {
+  font: notoSerif,
+  language: 'en',
+  script: shaping.Script.LATIN
+};
+const shapeText = ( text, direction ) => shaping.shapeRuns( text, direction, scriptData );
+
 init().then( async () => {
   const width = 512;
   const height = 512;
@@ -22,6 +35,64 @@ init().then( async () => {
       // TODO: handle destruction
     }
   } );
+
+  // user permissions request is likely a non-starter
+  // const fonts = await window.queryLocalFonts();
+  //
+  // const arialFontEntry = f.filter( g => g.fullName === 'Arial' )[ 0 ];
+  // if ( arialFontEntry ) {
+  //   // const arialFontBlob = await arialFontEntry.blob();
+  // }
+
+  // glyphEncodingMap[ font ][ index ] = VelloEncoding;
+  // NOTE: for fills only
+  const glyphEncodingMap = {};
+  const getGlyphEncoding = ( font, index ) => {
+    if ( !glyphEncodingMap[ font ] ) {
+      glyphEncodingMap[ font ] = {};
+    }
+    if ( glyphEncodingMap[ font ][ index ] === undefined ) {
+      const glyph = shaping.getGlyph( font, index );
+
+      console.log( glyph.bounds );
+
+      console.log( font, index );
+
+      const svgPathData = glyph.getSVGPath();
+      if ( svgPathData ) {
+        const encoding = new VelloEncoding();
+
+        encoding.svg_path( 'true', svgPathData );
+
+        glyphEncodingMap[ font ][ index ] = encoding;
+      }
+      else {
+        // empty, like whitespace
+        glyphEncodingMap[ font ][ index ] = null;
+      }
+    }
+    return glyphEncodingMap[ font ][ index ];
+  };
+  const getTextEncoding = ( text, direction ) => {
+    const shapedText = shapeText( text, direction );
+
+    const encoding = new VelloEncoding();
+
+    shapedText.glyphs.forEach( glyph => {
+      const glyphEncoding = getGlyphEncoding( glyph.font, glyph.index );
+
+      if ( glyphEncoding ) {
+        encoding.matrix( 1, 0, 0, 1, glyph.x, glyph.y );
+        encoding.linewidth( -1 );
+
+        encoding.append( glyphEncoding );
+
+        encoding.color( 0x000000ff );
+      }
+    } );
+
+    return encoding;
+  };
 
   const preferredFormat = navigator.gpu.getPreferredCanvasFormat();
 
@@ -47,9 +118,6 @@ init().then( async () => {
   canvas.style.width = `${Math.floor( width / backingScale )}px`;
   canvas.style.height = `${Math.floor( height / backingScale )}px`;
 
-  const sceneEncoding = VelloEncoding.new_scene();
-  const encoding = new VelloEncoding();
-
   // image ID => { id, image, width, height, buffer }
   const imageMap = {};
 
@@ -69,6 +137,9 @@ init().then( async () => {
   /***************************************************************************/
   // Scene
   /***************************************************************************/
+
+  const sceneEncoding = VelloEncoding.new_scene();
+  const encoding = new VelloEncoding();
 
   // An example image with a gradient
   const demoImageWidth = 256;
@@ -125,6 +196,8 @@ init().then( async () => {
   encoding.color( 0x000000ff );
 
   encoding.end_clip();
+
+  encoding.append_with_transform( getTextEncoding( 'How is this text? No hints!', shaping.Direction.LTR ), 40, 0, 0, 40, 5, 400 );
 
   sceneEncoding.append( encoding );
   sceneEncoding.append_with_transform( encoding, 0.4, 0, 0, 0.4, Math.floor( 512 * ( 1 - 0.4 ) ) + 20, 0 );
