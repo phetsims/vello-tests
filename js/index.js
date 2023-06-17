@@ -433,6 +433,7 @@ init().then( async () => {
   dispatch( 'coarse', 'coarse', workgroupCounts.coarse, [ configBuffer, sceneBuffer, drawMonoidBuffer, binHeaderBuffer, infoBinDataBuffer, pathBuffer, tileBuffer, bumpBuffer, ptclBuffer ] );
 
   // free sceneBuffer, drawMonoidBuffer, binHeaderBuffer, pathBuffer
+  // free bumpBuffer
 
   // let out_image = ImageProxy::new(params.width, params.height, ImageFormat::Rgba8);
   //
@@ -543,7 +544,6 @@ init().then( async () => {
 
   const canvasOutView = context.getCurrentTexture().createView();
 
-  // dispatch( 'fine', 'fine', workgroupCounts.fine, [ configBuffer, tileBuffer, segmentsBuffer, outImageView, ptclBuffer, gradientImageView, infoBinDataBuffer, atlasImageView ] );
   dispatch( 'fine', 'fine', workgroupCounts.fine, [ configBuffer, tileBuffer, segmentsBuffer, canvasOutView, ptclBuffer, gradientImageView, infoBinDataBuffer, atlasImageView ] );
 
   // NOTE: bgra8unorm vs rgba8unorm can't be copied, so this depends on the platform?
@@ -557,48 +557,7 @@ init().then( async () => {
   //   depthOrArrayLayers: 1
   // } );
 
-  /* NOTES: bits of coarse/fine shader calls not moved over, including buffer frees
-  self.fine_wg_count = Some(wg_counts.fine);
-  self.fine_resources = Some(FineResources {
-      config_buf,
-      bump_buf,
-      tile_buf,
-      segments_buf,
-      ptcl_buf,
-      gradient_image,
-      info_bin_data_buf,
-      image_atlas: ResourceProxy::Image(image_atlas),
-      out_image,
-  });
-  recording.free_resource(bump_buf);
-  recording
-
-  ......
-
-  let fine_wg_count = self.fine_wg_count.take().unwrap();
-  let fine = self.fine_resources.take().unwrap();
-  recording.dispatch(
-      shaders.fine,
-      fine_wg_count,
-      [
-          fine.config_buf,
-          fine.tile_buf,
-          fine.segments_buf,
-          ResourceProxy::Image(fine.out_image),
-          fine.ptcl_buf,
-          fine.gradient_image,
-          fine.info_bin_data_buf,
-          fine.image_atlas,
-      ],
-  );
-  recording.free_resource(fine.config_buf);
-  recording.free_resource(fine.tile_buf);
-  recording.free_resource(fine.segments_buf);
-  recording.free_resource(fine.ptcl_buf);
-  recording.free_resource(fine.gradient_image);
-  recording.free_resource(fine.image_atlas);
-  recording.free_resource(fine.info_bin_data_buf);
-   */
+  // free configBuffer, tileBuffer, segmentsBuffer, ptclBuffer, gradientImage(?), atlasImage(?), infoBinDataBuffer
 
   const commandBuffer = encoder.finish();
   device.queue.submit( [ commandBuffer ] );
@@ -606,11 +565,3 @@ init().then( async () => {
   sceneEncoding.free();
   demoImage.free();
 });
-
-// NOTE: Some render-path notes below:
-// render_to_surface
-// render_to_surface_async
-// Event::RedrawRequested (in with_winit's src/lib)
-// render_to_surface / render_to_surface_async
-// render_to_texture_async ( or... render_encoding_full )
-// render_encoding_coarse / record_fine
