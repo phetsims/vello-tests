@@ -8,7 +8,9 @@ import wasmInit from "../pkg/vello_tests.js";
 // Workaround for old namespacing
 window.kite = phet.kite;
 
-wasmInit().then( async () => {
+wasmInit().then( async wasm => {
+  const memory = wasm.memory;
+
   const adapter = await navigator.gpu?.requestAdapter( {
     powerPreference: 'high-performance'
   } );
@@ -55,10 +57,12 @@ wasmInit().then( async () => {
     usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.STORAGE_BINDING
   } );
 
-  // TODO: check for memory leaks
+  // TODO: check for memory leaks (ZOMG there are memory leaks in WASM)
 
   ( function step() {
     window.requestAnimationFrame( step, canvas );
+
+    console.log( memory.buffer.byteLength );
 
     if ( resizePending ) {
       resizePending = false;

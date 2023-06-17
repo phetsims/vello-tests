@@ -215,7 +215,7 @@ impl VelloLayout {
 
 // TODO: Find a way to wasm_bindgen that doesn't require duplicating structs
 #[wasm_bindgen]
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct VelloConfigUniform {
     pub width_in_tiles: u32,
     pub height_in_tiles: u32,
@@ -268,7 +268,7 @@ impl VelloWorkgroupSize {
 
 // TODO: Find a way to wasm_bindgen that doesn't require duplicating structs
 #[wasm_bindgen]
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub struct VelloWorkgroupCounts {
     pub use_large_path_scan: bool,
     pub path_reduce: VelloWorkgroupSize,
@@ -289,9 +289,20 @@ pub struct VelloWorkgroupCounts {
     pub fine: VelloWorkgroupSize,
 }
 
+static WORKGROUP_COUNTS_COUNT: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+impl Drop for VelloWorkgroupCounts {
+    fn drop(&mut self) {
+        let count = WORKGROUP_COUNTS_COUNT.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
+        // web_sys::console::log_1( &JsValue::from( format!( "drop VelloWorkgroupCounts {count}" ) ) );
+    }
+}
+
 impl VelloWorkgroupCounts {
     // convert WorkgroupCounts to VelloWorkgroupCounts
     pub fn from_config_uniform(workgroup_counts: WorkgroupCounts) -> VelloWorkgroupCounts {
+        let count = WORKGROUP_COUNTS_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        // web_sys::console::log_1( &JsValue::from( format!( "new VelloWorkgroupCounts {count}" ) ) );
         VelloWorkgroupCounts {
             use_large_path_scan: workgroup_counts.use_large_path_scan,
             path_reduce: VelloWorkgroupSize::from_tuple( workgroup_counts.path_reduce ),
@@ -444,10 +455,22 @@ pub struct VelloEncoding {
     encoding: Encoding
 }
 
+static VELLO_ENCODING_COUNTER: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+impl Drop for VelloEncoding {
+    fn drop(&mut self) {
+        let count = VELLO_ENCODING_COUNTER.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
+        // web_sys::console::log_1( &JsValue::from( format!( "drop VelloEncoding {count}" ) ) );
+    }
+}
+
 #[wasm_bindgen]
 impl VelloEncoding {
     #[wasm_bindgen(constructor)]
     pub fn new() -> VelloEncoding {
+        let count = VELLO_ENCODING_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        // web_sys::console::log_1( &JsValue::from( format!( "new VelloEncoding {count}" ) ) );
+
         VelloEncoding {
             encoding: Encoding::new()
         }

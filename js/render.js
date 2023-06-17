@@ -326,6 +326,8 @@ const render = ( sceneFrame, device, outTexture ) => {
 
   bufferPool.nextGeneration();
   renderInfo.free();
+  workgroupCounts.free();
+  bufferSizes.free();
 };
 
 export default render;
