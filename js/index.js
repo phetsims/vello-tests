@@ -1,6 +1,6 @@
 
 // name improvements for this
-import shaderCreator from "./shaders.js";
+import Shader from "./Shader.js";
 import BufferPool from "./BufferPool.js";
 import { default as init, VelloEncoding, VelloMix, VelloCompose } from "../pkg/vello_tests.js";
 
@@ -96,8 +96,7 @@ init().then( async () => {
 
   const preferredFormat = navigator.gpu.getPreferredCanvasFormat();
 
-  const shaders = shaderCreator( preferredFormat );
-  window.shaders = shaders;
+  const shaders = Shader.loadShaders( device );
 
   const canvas = document.createElement( 'canvas' );
   canvas.width = width;
@@ -133,68 +132,6 @@ init().then( async () => {
     };
     return image;
   };
-
-  Object.keys( shaders ).forEach( shaderName => {
-    const shader = shaders[ shaderName ];
-    shader.module = device.createShaderModule( {
-      label: shaderName,
-      code: shader.wgsl
-    } );
-
-    shader.bindGroupLayout = device.createBindGroupLayout( {
-      label: `${shaderName} bindGroupLayout`,
-      entries: shader.bindings.map( ( binding, i ) => {
-        const entry = {
-          binding: i,
-          visibility: GPUShaderStage.COMPUTE,
-        };
-
-        if ( binding === 'Buffer' || binding === 'BufReadOnly' || binding === 'Uniform' ) {
-          entry.buffer = {
-            type: {
-              Buffer: 'storage',
-              BufReadOnly: 'read-only-storage',
-              Uniform: 'uniform'
-            }[ binding ],
-            hasDynamicOffset: false
-          };
-        }
-        else if ( binding === 'Image' ) {
-          entry.storageTexture = {
-            access: 'write-only',
-            // format: preferredFormat,
-            // format: actualFormat, // We actually probably need rgba8 for the shaders to work, oops
-            format: preferredFormat, // We actually probably need rgba8 for the shaders to work, oops
-            viewDimension: '2d'
-          };
-        }
-        else if ( binding === 'ImageRead' ) {
-          // Note: fine takes ImageFormat::Rgba8 for Image/ImageRead
-          entry.texture = {
-            sampleType: 'float',
-            viewDimension: '2d',
-            multisampled: false
-          };
-        }
-        else {
-          throw new Error( `unknown binding: ${binding}` );
-        }
-
-        return entry;
-      } )
-    } );
-
-    shader.pipeline = device.createComputePipeline( {
-      label: `${shaderName} pipeline`,
-      layout: device.createPipelineLayout( {
-        bindGroupLayouts: [ shader.bindGroupLayout ],
-      } ),
-      compute: {
-        module: shader.module,
-        entryPoint: 'main',
-      },
-    } );
-  } );
 
   // TODO: check for memory leaks
 
@@ -328,35 +265,15 @@ init().then( async () => {
     const ptclBuffer = bufferPool.getBuffer( bufferSizes.ptcl.size_in_bytes, 'ptcl buffer' );
     const reducedBuffer = bufferPool.getBuffer( bufferSizes.path_reduced.size_in_bytes, 'reduced buffer' );
 
-    // TODO: rename, buffer could be GPUTextureView also
-    const buffersToEntries = buffers => buffers.map( ( buffer, i ) => ( {
-      binding: i,
-      // handle GPUTextureView
-      resource: buffer instanceof GPUBuffer ? { buffer: buffer } : buffer
-    } ) );
-
     const encoder = device.createCommandEncoder( {
       label: 'the encoder',
     } );
 
-    const dispatch = ( shaderName, internalShaderName, wg_counts, buffers ) => {
-      const shader = shaders[ internalShaderName ];
-      const bindGroup = device.createBindGroup( {
-        label: `${shaderName} bindGroup`,
-        layout: shader.bindGroupLayout,
-        entries: buffersToEntries( buffers )
-      } );
-      const computePass = encoder.beginComputePass( {
-        label: `${shaderName} compute pass`
-      } );
-      computePass.setPipeline( shader.pipeline );
-      computePass.setBindGroup( 0, bindGroup );
-      computePass.dispatchWorkgroups( wg_counts.x, wg_counts.y, wg_counts.z );
-      computePass.end(); // TODO: does this mess stuff up?
-    };
+    shaders.pathtag_reduce.dispatch( encoder, workgroupCounts.path_reduce, [
+      configBuffer, sceneBuffer, reducedBuffer
+    ] );
 
-    dispatch( 'pathtag_reduce', 'pathtag_reduce', workgroupCounts.path_reduce, [ configBuffer, sceneBuffer, reducedBuffer ] );
-
+    // TODO: rename?
     let pathtag_parent = reducedBuffer;
 
     let reduced2Buffer;
@@ -364,43 +281,53 @@ init().then( async () => {
     if ( workgroupCounts.use_large_path_scan ) {
       reduced2Buffer = bufferPool.getBuffer( bufferSizes.path_reduced2.size_in_bytes, 'reduced2 buffer' );
 
-      dispatch( 'pathtag_reduce2', 'pathtag_reduce2', workgroupCounts.path_reduce2, [ reducedBuffer, reduced2Buffer ] );
+      shaders.pathtag_reduce2.dispatch( encoder, workgroupCounts.path_reduce2, [
+        reducedBuffer, reduced2Buffer
+      ] );
 
       reducedScanBuffer = bufferPool.getBuffer( bufferSizes.path_reduced_scan.size_in_bytes, 'reducedScan buffer' );
 
-      dispatch( 'pathtag_scan1', 'pathtag_scan1', workgroupCounts.path_scan1, [ reducedBuffer, reduced2Buffer, reducedScanBuffer ] );
+      shaders.pathtag_scan1.dispatch( encoder, workgroupCounts.path_scan1, [
+        reducedBuffer, reduced2Buffer, reducedScanBuffer
+      ] );
 
       pathtag_parent = reducedScanBuffer;
     }
 
     const tagmonoidBuffer = bufferPool.getBuffer( bufferSizes.path_monoids.size_in_bytes, 'tagmonoid buffer' );
 
-    if ( workgroupCounts.use_large_path_scan ) {
-      dispatch( 'pathtag_scan', 'pathtag_scan_large', workgroupCounts.path_scan, [ configBuffer, sceneBuffer, pathtag_parent, tagmonoidBuffer ] );
-    }
-    else {
-      dispatch( 'pathtag_scan', 'pathtag_scan_small', workgroupCounts.path_scan, [ configBuffer, sceneBuffer, pathtag_parent, tagmonoidBuffer ] );
-    }
+    ( workgroupCounts.use_large_path_scan ? shaders.pathtag_scan_large : shaders.pathtag_scan_small ).dispatch( encoder, workgroupCounts.path_scan, [
+      configBuffer, sceneBuffer, pathtag_parent, tagmonoidBuffer
+    ] );
 
     bufferPool.freeBuffer( reducedBuffer );
     reduced2Buffer && bufferPool.freeBuffer( reduced2Buffer );
     reducedScanBuffer && bufferPool.freeBuffer( reducedScanBuffer );
 
     const pathBBoxBuffer = bufferPool.getBuffer( bufferSizes.path_bboxes.size_in_bytes, 'pathBBox buffer' );
-    dispatch( 'bbox_clear', 'bbox_clear', workgroupCounts.bbox_clear, [ configBuffer, pathBBoxBuffer ] );
+
+    shaders.bbox_clear.dispatch( encoder, workgroupCounts.bbox_clear, [
+      configBuffer, pathBBoxBuffer
+    ] );
 
     const cubicBuffer = bufferPool.getBuffer( bufferSizes.cubics.size_in_bytes, 'cubic buffer' );
 
-    dispatch( 'pathseg', 'pathseg', workgroupCounts.path_seg, [ configBuffer, sceneBuffer, tagmonoidBuffer, pathBBoxBuffer, cubicBuffer ] );
+    shaders.pathseg.dispatch( encoder, workgroupCounts.path_seg, [
+      configBuffer, sceneBuffer, tagmonoidBuffer, pathBBoxBuffer, cubicBuffer
+    ] );
 
     const drawReducedBuffer = bufferPool.getBuffer( bufferSizes.draw_reduced.size_in_bytes, 'drawReduced buffer' );
 
-    dispatch( 'draw_reduce', 'draw_reduce', workgroupCounts.draw_reduce, [ configBuffer, sceneBuffer, drawReducedBuffer ] );
+    shaders.draw_reduce.dispatch( encoder, workgroupCounts.draw_reduce, [
+      configBuffer, sceneBuffer, drawReducedBuffer
+    ] );
 
     const drawMonoidBuffer = bufferPool.getBuffer( bufferSizes.draw_monoids.size_in_bytes, 'drawMonoid buffer' );
     const clipInpBuffer = bufferPool.getBuffer( bufferSizes.clip_inps.size_in_bytes, 'clipInp buffer' );
 
-    dispatch( 'draw_leaf', 'draw_leaf', workgroupCounts.draw_leaf, [ configBuffer, sceneBuffer, drawReducedBuffer, pathBBoxBuffer, drawMonoidBuffer, infoBinDataBuffer, clipInpBuffer ] );
+    shaders.draw_leaf.dispatch( encoder, workgroupCounts.draw_leaf, [
+      configBuffer, sceneBuffer, drawReducedBuffer, pathBBoxBuffer, drawMonoidBuffer, infoBinDataBuffer, clipInpBuffer
+    ] );
 
     bufferPool.freeBuffer( drawReducedBuffer );
 
@@ -408,13 +335,17 @@ init().then( async () => {
     const clipBicBuffer = bufferPool.getBuffer( bufferSizes.clip_bics.size_in_bytes, 'clipBic buffer' );
 
     if ( workgroupCounts.clip_reduce.x > 0 ) {
-      dispatch( 'clip_reduce', 'clip_reduce', workgroupCounts.clip_reduce, [ configBuffer, clipInpBuffer, pathBBoxBuffer, clipBicBuffer, clipElBuffer ] );
+      shaders.clip_reduce.dispatch( encoder, workgroupCounts.clip_reduce, [
+        configBuffer, clipInpBuffer, pathBBoxBuffer, clipBicBuffer, clipElBuffer
+      ] );
     }
 
     const clipBBoxBuffer = bufferPool.getBuffer( bufferSizes.clip_bboxes.size_in_bytes, 'clipBBox buffer' );
 
     if ( workgroupCounts.clip_leaf.x > 0 ) {
-      dispatch( 'clip_leaf', 'clip_leaf', workgroupCounts.clip_leaf, [ configBuffer, clipInpBuffer, pathBBoxBuffer, clipBicBuffer, clipElBuffer, drawMonoidBuffer, clipBBoxBuffer ] );
+      shaders.clip_leaf.dispatch( encoder, workgroupCounts.clip_leaf, [
+        configBuffer, clipInpBuffer, pathBBoxBuffer, clipBicBuffer, clipElBuffer, drawMonoidBuffer, clipBBoxBuffer
+      ] );
     }
 
     bufferPool.freeBuffer( clipInpBuffer );
@@ -431,7 +362,9 @@ init().then( async () => {
     encoder.clearBuffer( bumpBuffer, 0 );
     // device.queue.writeBuffer( bumpBuffer, 0, new Uint8Array( bumpBuffer.size ) );
 
-    dispatch( 'binning', 'binning', workgroupCounts.binning, [ configBuffer, drawMonoidBuffer, pathBBoxBuffer, clipBBoxBuffer, drawBBoxBuffer, bumpBuffer, infoBinDataBuffer, binHeaderBuffer ] );
+    shaders.binning.dispatch( encoder, workgroupCounts.binning, [
+      configBuffer, drawMonoidBuffer, pathBBoxBuffer, clipBBoxBuffer, drawBBoxBuffer, bumpBuffer, infoBinDataBuffer, binHeaderBuffer
+    ] );
 
     bufferPool.freeBuffer( drawMonoidBuffer );
     bufferPool.freeBuffer( pathBBoxBuffer );
@@ -441,18 +374,26 @@ init().then( async () => {
     // in storage rather than workgroup memory.
     const pathBuffer = bufferPool.getBuffer( bufferSizes.paths.size_in_bytes, 'path buffer' );
 
-    dispatch( 'tile_alloc', 'tile_alloc', workgroupCounts.tile_alloc, [ configBuffer, sceneBuffer, drawBBoxBuffer, bumpBuffer, pathBuffer, tileBuffer ] );
+    shaders.tile_alloc.dispatch( encoder, workgroupCounts.tile_alloc, [
+      configBuffer, sceneBuffer, drawBBoxBuffer, bumpBuffer, pathBuffer, tileBuffer
+    ] );
 
     bufferPool.freeBuffer( drawBBoxBuffer );
 
-    dispatch( 'path_coarse', 'path_coarse_full', workgroupCounts.path_coarse, [ configBuffer, sceneBuffer, tagmonoidBuffer, cubicBuffer, pathBuffer, bumpBuffer, tileBuffer, segmentsBuffer ] );
+    shaders.path_coarse_full.dispatch( encoder, workgroupCounts.path_coarse, [
+      configBuffer, sceneBuffer, tagmonoidBuffer, cubicBuffer, pathBuffer, bumpBuffer, tileBuffer, segmentsBuffer
+    ] );
 
     bufferPool.freeBuffer( tagmonoidBuffer );
     bufferPool.freeBuffer( cubicBuffer );
 
-    dispatch( 'backdrop', 'backdrop_dyn', workgroupCounts.backdrop, [ configBuffer, pathBuffer, tileBuffer ] );
+    shaders.backdrop_dyn.dispatch( encoder, workgroupCounts.backdrop, [
+      configBuffer, pathBuffer, tileBuffer
+    ] );
 
-    dispatch( 'coarse', 'coarse', workgroupCounts.coarse, [ configBuffer, sceneBuffer, drawMonoidBuffer, binHeaderBuffer, infoBinDataBuffer, pathBuffer, tileBuffer, bumpBuffer, ptclBuffer ] );
+    shaders.coarse.dispatch( encoder, workgroupCounts.coarse, [
+      configBuffer, sceneBuffer, drawMonoidBuffer, binHeaderBuffer, infoBinDataBuffer, pathBuffer, tileBuffer, bumpBuffer, ptclBuffer
+    ] );
 
     // TODO: Check frees on all buffers. Note the config buffer (manually destroy that, or can we reuse it?)
     bufferPool.freeBuffer( sceneBuffer );
@@ -568,7 +509,10 @@ init().then( async () => {
       }
     }
 
-    dispatch( 'fine', 'fine', workgroupCounts.fine, [ configBuffer, tileBuffer, segmentsBuffer, outTexture.createView(), ptclBuffer, gradientImageView, infoBinDataBuffer, atlasImageView ] );
+    // Have the fine-rasterization shader use the preferred format as output (for now)
+    ( preferredFormat === 'bgra8unorm' ? shaders.fine_bgra8unorm : shaders.fine_rgba8unorm ).dispatch( encoder, workgroupCounts.fine, [
+      configBuffer, tileBuffer, segmentsBuffer, outTexture.createView(), ptclBuffer, gradientImageView, infoBinDataBuffer, atlasImageView
+    ] );
 
     // NOTE: bgra8unorm vs rgba8unorm can't be copied, so this depends on the platform?
     // encoder.copyTextureToTexture( {
@@ -586,8 +530,6 @@ init().then( async () => {
     bufferPool.freeBuffer( segmentsBuffer );
     bufferPool.freeBuffer( ptclBuffer );
     bufferPool.freeBuffer( infoBinDataBuffer );
-
-    // TODO: free images?
 
     const commandBuffer = encoder.finish();
     device.queue.submit( [ commandBuffer ] );
