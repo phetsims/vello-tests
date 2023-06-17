@@ -1,13 +1,13 @@
 {
-  "name": "vello-js",
+  "name": "vello-tests",
   "version": "0.1.0",
   "files": [
-    "vello_js_bg.wasm",
-    "vello_js.js",
-    "vello_js.d.ts"
+    "vello_tests_bg.wasm",
+    "vello_tests.js",
+    "vello_tests.d.ts"
   ],
-  "module": "vello_js.js",
-  "types": "vello_js.d.ts",
+  "module": "vello_tests.js",
+  "types": "vello_tests.d.ts",
   "sideEffects": [
     "./snippets/*"
   ]
