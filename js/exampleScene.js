@@ -81,6 +81,9 @@ const exampleScene = ( scale ) => {
   intermediateEncoding.append_with_transform( encoding, 0.4, 0, 0, 0.4, Math.floor( 512 * ( 1 - 0.4 ) ) + 20, 0 );
 
   sceneEncoding.append_with_transform( intermediateEncoding, scale, 0, 0, scale, 0, 0 );
+  sceneEncoding.append_with_transform( intermediateEncoding, scale, 0, 0, scale, 100, 100 );
+  sceneEncoding.append_with_transform( intermediateEncoding, scale, 0, 0, scale, 200, 200 );
+  sceneEncoding.append_with_transform( intermediateEncoding, scale, 0, 0, scale, 300, 300 );
 
   encoding.free();
   intermediateEncoding.free();
