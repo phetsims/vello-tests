@@ -31,14 +31,22 @@ wasmInit().then( async () => {
   // Trigger shader compilation before anything (will be cached)
   Shader.getShaders( device );
 
-  const width = 512;
-  const height = 512;
   const canvas = document.createElement( 'canvas' );
-  canvas.width = width;
-  canvas.height = height;
-  canvas.style.width = `${Math.floor( width / window.devicePixelRatio )}px`;
-  canvas.style.height = `${Math.floor( height / window.devicePixelRatio )}px`;
+  canvas.style.position = 'absolute';
+  canvas.style.left = '0';
+  canvas.style.top = '0';
   document.body.appendChild( canvas );
+
+  let resizePending = true;
+  // Can't synchronously do this in Firefox, see https://github.com/phetsims/vegas/issues/55 and
+  // https://bugzilla.mozilla.org/show_bug.cgi?id=840412.
+  const resizeListener = () => {
+    resizePending = true;
+  };
+  $( window ).resize( resizeListener );
+  window.addEventListener( 'resize', resizeListener );
+  window.addEventListener( 'orientationchange', resizeListener );
+  window.visualViewport && window.visualViewport.addEventListener( 'resize', resizeListener );
 
   const context = canvas.getContext( 'webgpu' );
   context.configure( {
@@ -52,7 +60,19 @@ wasmInit().then( async () => {
   ( function step() {
     window.requestAnimationFrame( step, canvas );
 
-    const sceneFrame = exampleScene();
+    if ( resizePending ) {
+      resizePending = false;
+
+      const fullWidth = window.innerWidth;
+      const fullHeight = window.innerHeight;
+
+      canvas.width = Math.ceil( fullWidth * window.devicePixelRatio );
+      canvas.height = Math.ceil( fullHeight * window.devicePixelRatio );
+      canvas.style.width = `${fullWidth}px`;
+      canvas.style.height = `${fullHeight}px`;
+    }
+
+    const sceneFrame = exampleScene( window.devicePixelRatio );
     render( sceneFrame, device, context.getCurrentTexture() );
     sceneFrame.dispose();
   } )();

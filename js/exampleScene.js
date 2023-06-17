@@ -5,7 +5,7 @@ import getTextEncoding from './getTextEncoding.js';
 
 let demoImage;
 
-const exampleScene = () => {
+const exampleScene = ( scale ) => {
 
   // Wait for WASM to be ready
   if ( !demoImage ) {
@@ -76,10 +76,14 @@ const exampleScene = () => {
     encoding.color( 0x000000ff );
   }
 
-  sceneEncoding.append( encoding );
-  sceneEncoding.append_with_transform( encoding, 0.4, 0, 0, 0.4, Math.floor( 512 * ( 1 - 0.4 ) ) + 20, 0 );
+  const intermediateEncoding = new VelloEncoding();
+  intermediateEncoding.append( encoding );
+  intermediateEncoding.append_with_transform( encoding, 0.4, 0, 0, 0.4, Math.floor( 512 * ( 1 - 0.4 ) ) + 20, 0 );
+
+  sceneEncoding.append_with_transform( intermediateEncoding, scale, 0, 0, scale, 0, 0 );
 
   encoding.free();
+  intermediateEncoding.free();
 
   sceneEncoding.finalize_scene();
 
