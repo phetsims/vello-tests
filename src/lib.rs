@@ -1,6 +1,7 @@
 use wasm_bindgen::prelude::*;
-use vello_encoding::{Encoding, Resolver, RenderConfig, DrawColor, Transform, Layout, ConfigUniform, BufferSize, WorkgroupCounts, WorkgroupSize, BufferSizes};
+use vello_encoding::{Encoding, Resolver, RenderConfig, DrawColor, DrawLinearGradient, DrawRadialGradient, Transform, Layout, ConfigUniform, BufferSize, WorkgroupCounts, WorkgroupSize, BufferSizes};
 use bytemuck;
+use peniko::{kurbo, Extend, ColorStop, BlendMode};
 
 // Install rust
 // Ensure we have wasm32 target with `rustup target add wasm32-unknown-unknown`
@@ -10,6 +11,173 @@ use bytemuck;
 // TODO: We're including a ton of font infrastructure here, perhaps we can ditch a lot of dependencies (fello? perhaps even kurbo but that seems useful)
 
 // Includes a ton of glue code to make it work with wasm_bindgen, I'm sure there's a better way to do this
+
+// TODO: improve all enumerations (better JS interface, don't duplicate stuff here)
+// TODO: can you wasm_bindgen existing types?
+#[wasm_bindgen]
+pub enum VelloMix {
+    /// Default attribute which specifies no blending. The blending formula simply selects the source color.
+    Normal = 0,
+    /// Source color is multiplied by the destination color and replaces the destination.
+    Multiply = 1,
+    /// Multiplies the complements of the backdrop and source color values, then complements the result.
+    Screen = 2,
+    /// Multiplies or screens the colors, depending on the backdrop color value.
+    Overlay = 3,
+    /// Selects the darker of the backdrop and source colors.
+    Darken = 4,
+    /// Selects the lighter of the backdrop and source colors.
+    Lighten = 5,
+    /// Brightens the backdrop color to reflect the source color. Painting with black produces no
+    /// change.
+    ColorDodge = 6,
+    /// Darkens the backdrop color to reflect the source color. Painting with white produces no
+    /// change.
+    ColorBurn = 7,
+    /// Multiplies or screens the colors, depending on the source color value. The effect is
+    /// similar to shining a harsh spotlight on the backdrop.
+    HardLight = 8,
+    /// Darkens or lightens the colors, depending on the source color value. The effect is similar
+    /// to shining a diffused spotlight on the backdrop.
+    SoftLight = 9,
+    /// Subtracts the darker of the two constituent colors from the lighter color.
+    Difference = 10,
+    /// Produces an effect similar to that of the Difference mode but lower in contrast. Painting
+    /// with white inverts the backdrop color; painting with black produces no change.
+    Exclusion = 11,
+    /// Creates a color with the hue of the source color and the saturation and luminosity of the
+    /// backdrop color.
+    Hue = 12,
+    /// Creates a color with the saturation of the source color and the hue and luminosity of the
+    /// backdrop color. Painting with this mode in an area of the backdrop that is a pure gray
+    /// (no saturation) produces no change.
+    Saturation = 13,
+    /// Creates a color with the hue and saturation of the source color and the luminosity of the
+    /// backdrop color. This preserves the gray levels of the backdrop and is useful for coloring
+    /// monochrome images or tinting color images.
+    Color = 14,
+    /// Creates a color with the luminosity of the source color and the hue and saturation of the
+    /// backdrop color. This produces an inverse effect to that of the Color mode.
+    Luminosity = 15,
+    /// Clip is the same as normal, but the latter always creates an isolated blend group and the
+    /// former can optimize that out.
+    Clip = 128,
+}
+
+fn vello_mix_to_mix(mix: VelloMix) -> peniko::Mix {
+    // TODO: can we avoid duplicating this?
+    match mix {
+        VelloMix::Normal => peniko::Mix::Normal,
+        VelloMix::Multiply => peniko::Mix::Multiply,
+        VelloMix::Screen => peniko::Mix::Screen,
+        VelloMix::Overlay => peniko::Mix::Overlay,
+        VelloMix::Darken => peniko::Mix::Darken,
+        VelloMix::Lighten => peniko::Mix::Lighten,
+        VelloMix::ColorDodge => peniko::Mix::ColorDodge,
+        VelloMix::ColorBurn => peniko::Mix::ColorBurn,
+        VelloMix::HardLight => peniko::Mix::HardLight,
+        VelloMix::SoftLight => peniko::Mix::SoftLight,
+        VelloMix::Difference => peniko::Mix::Difference,
+        VelloMix::Exclusion => peniko::Mix::Exclusion,
+        VelloMix::Hue => peniko::Mix::Hue,
+        VelloMix::Saturation => peniko::Mix::Saturation,
+        VelloMix::Color => peniko::Mix::Color,
+        VelloMix::Luminosity => peniko::Mix::Luminosity,
+        VelloMix::Clip => peniko::Mix::Clip,
+    }
+}
+
+#[wasm_bindgen]
+pub enum VelloCompose {
+    /// No regions are enabled.
+    Clear = 0,
+    /// Only the source will be present.
+    Copy = 1,
+    /// Only the destination will be present.
+    Dest = 2,
+    /// The source is placed over the destination.
+    SrcOver = 3,
+    /// The destination is placed over the source.
+    DestOver = 4,
+    /// The parts of the source that overlap with the destination are placed.
+    SrcIn = 5,
+    /// The parts of the destination that overlap with the source are placed.
+    DestIn = 6,
+    /// The parts of the source that fall outside of the destination are placed.
+    SrcOut = 7,
+    /// The parts of the destination that fall outside of the source are placed.
+    DestOut = 8,
+    /// The parts of the source which overlap the destination replace the destination. The
+    /// destination is placed everywhere else.
+    SrcAtop = 9,
+    /// The parts of the destination which overlaps the source replace the source. The source is
+    /// placed everywhere else.
+    DestAtop = 10,
+    /// The non-overlapping regions of source and destination are combined.
+    Xor = 11,
+    /// The sum of the source image and destination image is displayed.
+    Plus = 12,
+    /// Allows two elements to cross fade by changing their opacities from 0 to 1 on one
+    /// element and 1 to 0 on the other element.
+    PlusLighter = 13,
+}
+
+fn vello_compose_to_compose(compose: VelloCompose) -> peniko::Compose {
+    // TODO: can we avoid duplicating this?
+    match compose {
+        VelloCompose::Clear => peniko::Compose::Clear,
+        VelloCompose::Copy => peniko::Compose::Copy,
+        VelloCompose::Dest => peniko::Compose::Dest,
+        VelloCompose::SrcOver => peniko::Compose::SrcOver,
+        VelloCompose::DestOver => peniko::Compose::DestOver,
+        VelloCompose::SrcIn => peniko::Compose::SrcIn,
+        VelloCompose::DestIn => peniko::Compose::DestIn,
+        VelloCompose::SrcOut => peniko::Compose::SrcOut,
+        VelloCompose::DestOut => peniko::Compose::DestOut,
+        VelloCompose::SrcAtop => peniko::Compose::SrcAtop,
+        VelloCompose::DestAtop => peniko::Compose::DestAtop,
+        VelloCompose::Xor => peniko::Compose::Xor,
+        VelloCompose::Plus => peniko::Compose::Plus,
+        VelloCompose::PlusLighter => peniko::Compose::PlusLighter,
+    }
+}
+
+/// Defines the layer composition function for a blend operation.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[repr(C)]
+pub enum Compose {
+    /// No regions are enabled.
+    Clear = 0,
+    /// Only the source will be present.
+    Copy = 1,
+    /// Only the destination will be present.
+    Dest = 2,
+    /// The source is placed over the destination.
+    SrcOver = 3,
+    /// The destination is placed over the source.
+    DestOver = 4,
+    /// The parts of the source that overlap with the destination are placed.
+    SrcIn = 5,
+    /// The parts of the destination that overlap with the source are placed.
+    DestIn = 6,
+    /// The parts of the source that fall outside of the destination are placed.
+    SrcOut = 7,
+    /// The parts of the destination that fall outside of the source are placed.
+    DestOut = 8,
+    /// The parts of the source which overlap the destination replace the destination. The
+    /// destination is placed everywhere else.
+    SrcAtop = 9,
+    /// The parts of the destination which overlaps the source replace the source. The source is
+    /// placed everywhere else.
+    DestAtop = 10,
+    /// The non-overlapping regions of source and destination are combined.
+    Xor = 11,
+    /// The sum of the source image and destination image is displayed.
+    Plus = 12,
+    /// Allows two elements to cross fade by changing their opacities from 0 to 1 on one
+    /// element and 1 to 0 on the other element.
+    PlusLighter = 13,
+}
 
 // TODO: Find a way to wasm_bindgen that doesn't require duplicating structs
 #[wasm_bindgen]
@@ -222,7 +390,16 @@ impl VelloBufferSizes {
 pub struct RenderInfo {
     scene: Vec<u8>,
     layout: Layout,
-    render_config: RenderConfig
+    render_config: RenderConfig,
+    ramps: Vec<u8>,
+    pub ramps_width: u32,
+    pub ramps_height: u32,
+
+    // Packed as triples of (image ID, x, y)
+    images: Vec<u64>,
+
+    pub images_width: u32,
+    pub images_height: u32,
 }
 
 #[wasm_bindgen]
@@ -230,6 +407,8 @@ impl RenderInfo {
     pub fn scene(&self) -> js_sys::Uint8Array {
         js_sys::Uint8Array::from(&self.scene[..])
     }
+    pub fn ramps(&self) -> js_sys::Uint8Array { js_sys::Uint8Array::from(&self.ramps[..]) }
+    pub fn images(&self) -> js_sys::BigUint64Array { js_sys::BigUint64Array::from(&self.images[..]) }
     pub fn layout(&self) -> VelloLayout {
         VelloLayout::from_layout( self.layout )
     }
@@ -244,6 +423,18 @@ impl RenderInfo {
     }
     pub fn config_bytes(&self) -> js_sys::Uint8Array {
         js_sys::Uint8Array::from(bytemuck::bytes_of(&self.render_config.gpu))
+    }
+}
+
+#[wasm_bindgen]
+pub struct VelloImage {
+    image: peniko::Image
+}
+
+#[wasm_bindgen]
+impl VelloImage {
+    pub fn id(&self) -> u64 {
+        self.image.data.id()
     }
 }
 
@@ -262,9 +453,33 @@ impl VelloEncoding {
         }
     }
 
-    // TODO: appending, and perhaps initialization based on whether it is a fragment or not?
-    // TODO: gradients and images
-    // TODO: clipping
+    pub fn new_scene() -> VelloEncoding {
+        let mut encoding = Encoding::new();
+        encoding.reset( false );
+
+        VelloEncoding {
+            encoding
+        }
+    }
+
+    // Creates an image stub (no data) with the given dimensions
+    pub fn new_image(width: u32, height: u32) -> VelloImage {
+        // web_sys::console::log_1( &JsValue::from( format!( "new_image {width} {height}" ) ) );
+        VelloImage {
+            image: peniko::Image::new(peniko::Blob::new( std::sync::Arc::new( Vec::new()) ),peniko::Format::Rgba8, width, height)
+        }
+    }
+
+    pub fn append(&mut self, other: &VelloEncoding) {
+        self.encoding.append( &other.encoding, &None );
+    }
+
+    pub fn append_with_transform(&mut self, other: &VelloEncoding, a00: f32, a10: f32, a01: f32, a11: f32, a20: f32, a21: f32) {
+        self.encoding.append( &other.encoding, &Some( Transform {
+            matrix: [ a00, a10, a01, a11 ],
+            translation: [ a20, a21 ]
+        } ) );
+    }
 
     pub fn reset(&mut self, is_fragment: bool) {
         self.encoding.reset( is_fragment );
@@ -274,11 +489,17 @@ impl VelloEncoding {
         self.encoding.encode_linewidth( linewidth );
     }
 
-    pub fn matrix(&mut self, a00: f32, a01: f32, a10: f32, a11: f32, a20: f32, a21: f32) {
+    pub fn matrix(&mut self, a00: f32, a10: f32, a01: f32, a11: f32, a20: f32, a21: f32) {
         self.encoding.encode_transform( Transform {
             matrix: [ a00, a10, a01, a11 ],
             translation: [ a20, a21 ]
         } );
+    }
+
+    pub fn svg_path(&mut self, is_fill: bool, path: String ) {
+        let path = kurbo::BezPath::from_svg( &path.as_str() ).unwrap();
+
+        self.encoding.encode_shape(&path, is_fill);
     }
 
     // wasm_bindgen REALLY doesn't like lifetimes, I fought a battle to create a Path wrapper struct
@@ -372,25 +593,80 @@ impl VelloEncoding {
     }
 
     pub fn color(&mut self, rgba: u32) {
-        // TODO: should we include a transform for the color? Seems ok to skip for now
-        // self.encoding.encode_transform( Transform::IDENTITY );
-        self.encoding.encode_color( DrawColor {
-            rgba
+        self.encoding.encode_color( rgba8_to_draw_color( rgba ) );
+    }
+
+    pub fn linear_gradient(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, alpha: f32, extend: u8, offsets: js_sys::Float32Array, colors: js_sys::Uint32Array ) {
+        // TODO: factor out offsets/colors -> impl Iterator<Item = ColorStop>
+        // TODO: ran into to_vec() issues, need to learn more Rust
+        self.encoding.encode_linear_gradient( DrawLinearGradient {
+            index: 0,
+            p0: [ x0, y0 ],
+            p1: [ x1, y1 ]
+        }, offsets.to_vec().iter().zip( colors.to_vec().iter() ).map(|(offset, color)| {
+            ColorStop {
+                offset: *offset,
+                color: rgba8_to_color(*color)
+            }
+        }), alpha, match extend {
+            0 => Extend::Pad,
+            1 => Extend::Repeat,
+            2 => Extend::Reflect,
+            _ => panic!("Unknown extend mode")
         } );
     }
 
+    pub fn radial_gradient(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, r0: f32, r1: f32, alpha: f32, extend: u8, offsets: js_sys::Float32Array, colors: js_sys::Uint32Array ) {
+        self.encoding.encode_radial_gradient( DrawRadialGradient {
+            index: 0,
+            p0: [ x0, y0 ],
+            p1: [ x1, y1 ],
+            r0,
+            r1
+        }, offsets.to_vec().iter().zip( colors.to_vec().iter() ).map(|(offset, color)| {
+            ColorStop {
+                offset: *offset,
+                color: rgba8_to_color(*color)
+            }
+        }), alpha, match extend {
+            0 => Extend::Pad,
+            1 => Extend::Repeat,
+            2 => Extend::Reflect,
+            _ => panic!("Unknown extend mode")
+        } );
+    }
+
+    // For a layer push: matrix, linewidth(-1), shape, begin_clip
+    pub fn begin_clip(&mut self, mix: VelloMix, compose: VelloCompose, alpha: f32) {
+        self.encoding.encode_begin_clip( BlendMode {
+            mix: vello_mix_to_mix(mix),
+            compose: vello_compose_to_compose(compose)
+        }, alpha );
+    }
+
+    pub fn end_clip(&mut self) {
+        self.encoding.encode_end_clip();
+    }
+
+    // TODO: since we're manually free'ing VelloImage, are we going to blow away the encoding ImageCache?
+    // TODO: probably need to free encodings using any images BEFORE the images?
+    // TODO: do a full check into this
+    pub fn image(&mut self, image: &VelloImage, alpha: f32) {
+        // web_sys::console::log_1( &JsValue::from( format!( "image {} {}", image.image.width, image.image.height ) ) );
+        self.encoding.encode_image(&image.image, alpha);
+    }
+
+    pub fn finalize_scene(&mut self) {
+        // Dummy path to make the previous paths show up (since we're a fill with no area, it shouldn't show up)
+        self.svg_path(true, String::from("M 0 0 L 1 0"));
+    }
+
     pub fn render(&mut self, width: u32, height: u32, base_color: u32) -> RenderInfo {
-        let base_color = peniko::Color::rgba8(
-            (base_color >> 24) as u8,
-            (base_color >> 16) as u8,
-            (base_color >> 8) as u8,
-            base_color as u8
-        );
+        let base_color = rgba8_to_color(base_color);
 
         let mut resolver = Resolver::new();
         let mut packed: Vec<u8> = vec![];
 
-        // TODO: gradients/images
         let (layout, ramps, images) = resolver.resolve(&self.encoding, &mut packed);
 
         let cpu_config = RenderConfig::new(&layout, width, height, &base_color);
@@ -400,8 +676,29 @@ impl VelloEncoding {
         RenderInfo {
             scene: packed,
             layout,
-            render_config: cpu_config
+            render_config: cpu_config,
+            ramps: ( bytemuck::cast_slice(ramps.data) as &[u8] ).into(),
+            ramps_width: ramps.width,
+            ramps_height: ramps.height,
+            images: images.images.iter().map(|entry| [entry.0.data.id(), entry.1 as u64, entry.2 as u64]).flatten().collect(),
+            images_width: images.width,
+            images_height: images.height
         }
+    }
+}
+
+pub fn rgba8_to_color(rgba: u32) -> peniko::Color {
+    peniko::Color::rgba8(
+        (rgba >> 24) as u8,
+        (rgba >> 16) as u8,
+        (rgba >> 8) as u8,
+        rgba as u8
+    )
+}
+
+pub fn rgba8_to_draw_color(rgba: u32) -> DrawColor {
+    DrawColor {
+        rgba: rgba8_to_color(rgba).to_premul_u32() // Need premultiplied
     }
 }
 
