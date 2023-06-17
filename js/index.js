@@ -256,7 +256,7 @@ init().then( async () => {
     encoding.linewidth( -1 );
     // TODO: add rect() to avoid overhead
     encoding.svg_path( true, 'M 0 0 L 512 0 L 256 256 L 0 512 Z' );
-    encoding.begin_clip( VelloMix.Clip, VelloCompose.SrcOver, 0.5 ); // TODO: alpha 0.5 on clip layer fails EXCEPT on fine tiles where it ends
+    encoding.begin_clip( VelloMix.Normal, VelloCompose.SrcOver, 0.5 ); // TODO: alpha 0.5 on clip layer fails EXCEPT on fine tiles where it ends
 
     encoding.matrix( 3, 0, 0, 3, 50, 150 );
     encoding.linewidth( -1 );
