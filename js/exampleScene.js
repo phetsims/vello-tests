@@ -5,7 +5,7 @@ import getTextEncoding from './getTextEncoding.js';
 
 let demoImage;
 
-const exampleScene = ( dt ) => {
+const exampleScene = () => {
 
   // Wait for WASM to be ready
   if ( !demoImage ) {

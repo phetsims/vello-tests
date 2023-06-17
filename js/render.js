@@ -1,9 +1,12 @@
 import BufferPool from "./BufferPool.js";
 import imageMap from './imageMap.js';
+import Shader from './Shader.js';
 
-const render = ( sceneFrame, device, shaders, outTexture ) => {
+const render = ( sceneFrame, device, outTexture ) => {
   const width = outTexture.width;
   const height = outTexture.height;
+
+  const shaders = Shader.getShaders( device );
 
   const preferredFormat = outTexture.format;
   if ( preferredFormat !== 'bgra8unorm' && preferredFormat !== 'rgba8unorm' ) {

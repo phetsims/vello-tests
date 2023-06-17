@@ -161,6 +161,9 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
  */
 
+// device => shader map
+const shaderDeviceMap = new WeakMap();
+
 export default class Shader {
   constructor( shaderName, data, device, format = 'rgba8unorm' ) {
     this.name = shaderName;
@@ -252,6 +255,13 @@ export default class Shader {
       // handle GPUTextureView
       resource: resources instanceof GPUBuffer ? { buffer: resources } : resources
     } ) )
+  }
+
+  static getShaders( device ) {
+    if ( !shaderDeviceMap.has( device ) ) {
+      shaderDeviceMap.set( device, Shader.loadShaders( device ) );
+    }
+    return shaderDeviceMap.get( device );
   }
 
   static loadShaders( device ) {

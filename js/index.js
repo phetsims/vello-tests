@@ -28,6 +28,9 @@ wasmInit().then( async () => {
     }
   } );
 
+  // Trigger shader compilation before anything (will be cached)
+  Shader.getShaders( device );
+
   const width = 512;
   const height = 512;
   const canvas = document.createElement( 'canvas' );
@@ -46,23 +49,11 @@ wasmInit().then( async () => {
 
   // TODO: check for memory leaks
 
-  const shaders = Shader.loadShaders( device );
-
-  // keep track of how much time elapsed over the last frame
-  let lastTime = 0;
-  let timeElapsedInSeconds = 0;
   ( function step() {
     window.requestAnimationFrame( step, canvas );
 
-    // calculate how much time has elapsed since we rendered the last frame
-    const timeNow = Date.now();
-    if ( lastTime !== 0 ) {
-      timeElapsedInSeconds = ( timeNow - lastTime ) / 1000.0;
-    }
-    lastTime = timeNow;
-
-    const sceneFrame = exampleScene( timeElapsedInSeconds );
-    render( sceneFrame, device, shaders, context.getCurrentTexture() );
+    const sceneFrame = exampleScene();
+    render( sceneFrame, device, context.getCurrentTexture() );
     sceneFrame.dispose();
   } )();
 });
