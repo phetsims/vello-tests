@@ -1,5 +1,5 @@
 use wasm_bindgen::prelude::*;
-use vello_encoding::{Encoding, Resolver, RenderConfig, DrawColor, DrawLinearGradient, DrawRadialGradient, Transform, Layout, ConfigUniform, BufferSize, WorkgroupCounts, WorkgroupSize, BufferSizes};
+use vello_encoding::{Encoding, Resolver, RenderConfig, DrawColor, PathTag, DrawLinearGradient, DrawRadialGradient, Transform, Layout, ConfigUniform, BufferSize, WorkgroupCounts, WorkgroupSize, BufferSizes};
 use bytemuck;
 use peniko::{kurbo, Extend, ColorStop, BlendMode};
 
@@ -485,6 +485,10 @@ impl VelloEncoding {
         self.encoding.reset( is_fragment );
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.encoding.is_empty()
+    }
+
     pub fn linewidth(&mut self, linewidth: f32) {
         self.encoding.encode_linewidth( linewidth );
     }
@@ -496,10 +500,17 @@ impl VelloEncoding {
         } );
     }
 
-    pub fn svg_path(&mut self, is_fill: bool, path: String ) {
+    pub fn svg_path(&mut self, is_fill: bool, insert_path_marker: bool, path: String ) -> bool {
         let path = kurbo::BezPath::from_svg( &path.as_str() ).unwrap();
 
-        self.encoding.encode_shape(&path, is_fill);
+        let mut encoder = self.encoding.encode_path(is_fill);
+        encoder.shape(&path);
+        encoder.finish(insert_path_marker) != 0
+    }
+
+    pub fn insert_path_marker(&mut self) {
+        self.encoding.path_tags.push(PathTag::PATH);
+        self.encoding.n_paths += 1;
     }
 
     // wasm_bindgen REALLY doesn't like lifetimes, I fought a battle to create a Path wrapper struct
@@ -517,7 +528,7 @@ impl VelloEncoding {
     //   { type: 'LineTo', x: -100, y: 100 },
     //   { type: 'LineTo', x: -100, y: -100 }
     // ]
-    pub fn json_path(&mut self, is_fill: bool, insert_path_marker: bool, json: String ) {
+    pub fn json_path(&mut self, is_fill: bool, insert_path_marker: bool, json: String ) -> bool {
         // web_sys::console::log_1( &json.as_str().into() );
 
         let mut path_encoder = self.encoding.encode_path( is_fill );
@@ -589,7 +600,7 @@ impl VelloEncoding {
             _ => panic!("Non-array")
         }
 
-        path_encoder.finish( insert_path_marker );
+        path_encoder.finish( insert_path_marker ) != 0
     }
 
     pub fn color(&mut self, rgba: u32) {
@@ -658,7 +669,7 @@ impl VelloEncoding {
 
     pub fn finalize_scene(&mut self) {
         // Dummy path to make the previous paths show up (since we're a fill with no area, it shouldn't show up)
-        self.svg_path(true, String::from("M 0 0 L 1 0"));
+        self.svg_path(true, true, String::from("M 0 0 L 1 0"));
     }
 
     pub fn render(&mut self, width: u32, height: u32, base_color: u32) -> RenderInfo {

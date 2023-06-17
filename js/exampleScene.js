@@ -42,35 +42,39 @@ const exampleScene = () => {
 
   encoding.matrix( c, -s, s, c, 150, 200 );
   encoding.linewidth( -1 );
-  encoding.svg_path( true, 'M 0 0 L 128 0 Q 256 0 256 128 L 256 256 L 128 256 Q 0 256 0 128 L 0 0 Z' );
+  encoding.svg_path( true, true, 'M 0 0 L 128 0 Q 256 0 256 128 L 256 256 L 128 256 Q 0 256 0 128 L 0 0 Z' );
   encoding.image( demoImage, 1 );
 
   encoding.matrix( c, -s, s, c, 200, 400 );
   encoding.linewidth( -1 );
-  encoding.svg_path( true, 'M -100 -100 L 100 -100 L 0 100 L -100 100 L -100 -100 Z' );
+  encoding.svg_path( true, true, 'M -100 -100 L 100 -100 L 0 100 L -100 100 L -100 -100 Z' );
   encoding.radial_gradient( 0, 0, 0, 0, 20, 120, 1, 0, new Float32Array( [ 0, 1 ] ), new Uint32Array( [ 0x0000ffff, 0x00ff00ff ] ) );
 
   // For a layer push: matrix, linewidth(-1), shape, begin_clip
   encoding.matrix( 1, 0, 0, 1, 0, 0 );
   encoding.linewidth( -1 );
   // TODO: add rect() to avoid overhead
-  encoding.svg_path( true, 'M 0 0 L 512 0 L 256 256 L 0 512 Z' );
+  encoding.svg_path( true, true, 'M 0 0 L 512 0 L 256 256 L 0 512 Z' );
   encoding.begin_clip( VelloMix.Normal, VelloCompose.SrcOver, 0.5 ); // TODO: alpha 0.5 on clip layer fails EXCEPT on fine tiles where it ends
 
   encoding.matrix( 3, 0, 0, 3, 50, 150 );
   encoding.linewidth( -1 );
-  encoding.svg_path( true, 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' );
+  encoding.svg_path( true, true, 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' );
   encoding.color( 0xff00ff66 );
 
   encoding.matrix( 3, 0, 0, 3, 50, 150 );
   encoding.linewidth( 1 );
-  encoding.svg_path( false, 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' );
+  encoding.svg_path( false, true, 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' );
   encoding.color( 0x000000ff );
 
   encoding.end_clip();
 
   const textScale = 40 + 10 * Math.sin( Date.now() / 1000 );
-  encoding.append_with_transform( getTextEncoding( 'How is this text? No hints!', shaping.Direction.LTR ), textScale, 0, 0, textScale, 5, 400 );
+  const textEncoding = getTextEncoding( 'How is this text? No hints!', shaping.Direction.LTR );
+  if ( !textEncoding.is_empty() ) {
+    encoding.append_with_transform( textEncoding, textScale, 0, 0, textScale, 5, 400 );
+    encoding.color( 0x000000ff );
+  }
 
   sceneEncoding.append( encoding );
   sceneEncoding.append_with_transform( encoding, 0.4, 0, 0, 0.4, Math.floor( 512 * ( 1 - 0.4 ) ) + 20, 0 );

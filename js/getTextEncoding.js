@@ -32,7 +32,7 @@ const getGlyphEncoding = ( font, index ) => {
     if ( svgPathData ) {
       const encoding = new VelloEncoding();
 
-      encoding.svg_path( 'true', svgPathData );
+      encoding.svg_path( true, false, svgPathData );
 
       glyphEncodingMap[ font ][ index ] = encoding;
     }
@@ -47,19 +47,24 @@ const getTextEncoding = ( text, direction ) => {
   const shapedText = shapeText( text, direction );
 
   const encoding = new VelloEncoding();
+  let hasEncodedGlyph = false;
 
   shapedText.glyphs.forEach( glyph => {
     const glyphEncoding = getGlyphEncoding( glyph.font, glyph.index );
 
     if ( glyphEncoding ) {
+      hasEncodedGlyph = true;
+
       encoding.matrix( 1, 0, 0, 1, glyph.x, glyph.y );
       encoding.linewidth( -1 );
 
       encoding.append( glyphEncoding );
-
-      encoding.color( 0x000000ff );
     }
   } );
+
+  if ( hasEncodedGlyph ) {
+    encoding.insert_path_marker();
+  }
 
   return encoding;
 };
