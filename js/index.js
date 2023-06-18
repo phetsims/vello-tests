@@ -62,7 +62,7 @@ wasmInit().then( async wasm => {
   ( function step() {
     window.requestAnimationFrame( step, canvas );
 
-    console.log( memory.buffer.byteLength );
+    // console.log( memory.buffer.byteLength );
 
     if ( resizePending ) {
       resizePending = false;

@@ -650,6 +650,7 @@ impl VelloEncoding {
         } );
     }
 
+    // TODO: change the parameter order here. it's confusing, and matches nothing
     pub fn radial_gradient(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, r0: f32, r1: f32, alpha: f32, extend: u8, offsets: js_sys::Float32Array, colors: js_sys::Uint32Array ) {
         self.encoding.encode_radial_gradient( DrawRadialGradient {
             index: 0,
@@ -718,6 +719,20 @@ impl VelloEncoding {
             images_width: images.width,
             images_height: images.height
         }
+    }
+
+    pub fn print_debug(&mut self) {
+        web_sys::console::log_1( &JsValue::from( format!( "path_tags\n{}", self.encoding.path_tags.iter().map(|x| x.0.to_string()).fold(String::new(), |a, b| a + ", " + b.as_str()) ) ) );
+        web_sys::console::log_1( &JsValue::from( format!( "path_data\n{}", self.encoding.path_data.iter().map(|x| x.to_string()).fold(String::new(), |a, b| a + ", " + b.as_str()) ) ) );
+        web_sys::console::log_1( &JsValue::from( format!( "draw_tags\n{}", self.encoding.draw_tags.iter().map(|x| x.0.to_string()).fold(String::new(), |a, b| a + ", " + b.as_str()) ) ) );
+        web_sys::console::log_1( &JsValue::from( format!( "draw_data\n{}", self.encoding.draw_data.iter().map(|x| x.to_string()).fold(String::new(), |a, b| a + ", " + b.as_str()) ) ) );
+        web_sys::console::log_1( &JsValue::from( format!( "transforms\n{}", self.encoding.transforms.iter().map(|x| format!( "_ a00:{} a10:{} a01:{} a11:{} a02:{} a12:{}_", x.matrix[0], x.matrix[1], x.matrix[2], x.matrix[3], x.translation[0], x.translation[1] ) ).fold(String::new(), |a, b| a + "\n" + b.as_str()) ) ) );
+        web_sys::console::log_1( &JsValue::from( format!( "linewidths\n{}", self.encoding.linewidths.iter().map(|x| x.to_string()).fold(String::new(), |a, b| a + ", " + b.as_str()) ) ) );
+        // TODO: resources
+        web_sys::console::log_1( &JsValue::from( format!( "n_paths\n{}", self.encoding.n_paths ) ) );
+        web_sys::console::log_1( &JsValue::from( format!( "n_path_segments\n{}", self.encoding.n_path_segments ) ) );
+        web_sys::console::log_1( &JsValue::from( format!( "n_clips\n{}", self.encoding.n_clips ) ) );
+        web_sys::console::log_1( &JsValue::from( format!( "n_open_clips\n{}", self.encoding.n_open_clips ) ) );
     }
 }
 
