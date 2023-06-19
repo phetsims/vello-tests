@@ -46,10 +46,12 @@ export class ColorStop {
 }
 
 export class ImageStub {
-  constructor( width, height, id ) {
+  constructor( width, height, buffer ) {
     this.width = width;
     this.height = height;
-    this.id = id;
+    this.buffer = buffer;
+    // TODO: don't have this mutate what we pass in as "parameters" to the encoding (allow images to be used with
+    // TODO: multiple encodings
     this.xy = new Point( 0, 0 );
   }
 }
@@ -145,26 +147,6 @@ export class Compose {
   /// Allows two elements to cross fade by changing their opacities from 0 to 1 on one
   /// element and 1 to 0 on the other element.
   static PlusLighter = 13;
-}
-
-export class StreamOffsets {
-  constructor( options ) {
-    this.path_tags = options?.path_tags || 0;
-    this.path_data = options?.path_data || 0;
-    this.draw_tags = options?.draw_tags || 0;
-    this.draw_data = options?.draw_data || 0;
-    this.transforms = options?.transforms || 0;
-    this.linewidths = options?.linewidths || 0;
-  }
-
-  add( other ) {
-    this.path_tags += other.path_tags;
-    this.path_data += other.path_data;
-    this.draw_tags += other.draw_tags;
-    this.draw_data += other.draw_data;
-    this.transforms += other.transforms;
-    this.linewidths += other.linewidths;
-  }
 }
 
 const f32_to_bytes = float => {
@@ -767,18 +749,6 @@ export default class Encoding {
     } ) ) );
   }
 
-  /// Returns a snapshot of the current stream offsets.
-  stream_offsets() {
-    return new StreamOffsets( {
-      path_tags: this.path_tags.length,
-      path_data: this.path_data.length,
-      draw_tags: this.draw_tags.length,
-      draw_data: this.draw_data.length,
-      transforms: this.transforms.length,
-      linewidths: this.linewidths.length
-    } );
-  }
-
   /// Encodes a linewidth.
   encode_linewidth( linewidth ) {
     if ( this.linewidths[ this.linewidths.length - 1 ] !== linewidth ) {
@@ -1071,17 +1041,6 @@ export default class Encoding {
     }
   }
 
-  // Swap the last two tags in the path tag stream; used for transformed
-  // gradients.
-  swap_last_path_tags() {
-    let len = this.path_tags.length;
-
-    // Swap
-    const first = this.path_tags[ len - 1 ];
-    this.path_tags[ len - 1 ] = this.path_tags[ len - 2 ];
-    this.path_tags[ len - 2 ] = first;
-  }
-
   // TODO: make this workaround not needed
   finalize_scene() {
     this.encode_path( true );
@@ -1103,6 +1062,17 @@ export default class Encoding {
     console.log( `n_path_segments\n${this.n_path_segments}` );
     console.log( `n_clips\n${this.n_clips}` );
     console.log( `n_open_clips\n${this.n_open_clips}` );
+  }
+
+  prepareRender( width, height, base_color ) {
+    const resolved = this.resolve();
+
+    const renderConfig = new RenderConfig( resolved.layout, width, height, base_color );
+
+    return {
+      ...resolved,
+      renderConfig
+    }
   }
 
   /// Resolves late bound resources and packs an encoding. Returns the packed
