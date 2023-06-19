@@ -452,7 +452,7 @@ export class ConfigUniform {
   }
 
   to_typed_array() {
-    return new Uint32Array( [
+    return new Uint8Array( [
       ...u32_to_bytes( this.width_in_tiles ),
       ...u32_to_bytes( this.height_in_tiles ),
       ...u32_to_bytes( this.target_width ),
@@ -1080,6 +1080,15 @@ export default class Encoding {
     const first = this.path_tags[ len - 1 ];
     this.path_tags[ len - 1 ] = this.path_tags[ len - 2 ];
     this.path_tags[ len - 2 ] = first;
+  }
+
+  // TODO: make this workaround not needed
+  finalize_scene() {
+    this.encode_path( true );
+    this.move_to( 0, 0 );
+    this.line_to( 1, 0 );
+    this.close();
+    this.finish( true );
   }
 
   print_debug() {
