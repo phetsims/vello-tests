@@ -40,14 +40,12 @@ const f32_to_bytes = float => {
   view.setFloat32( 0, float );
   return [ ...scratch_to_bytes ].reverse();
 };
-window.f32_to_bytes = f32_to_bytes;
 
 const u32_to_bytes = int => {
   const view = new DataView( scratch_to_bytes.buffer );
   view.setUint32( 0, int );
   return [ ...scratch_to_bytes ].reverse();
 };
-window.u32_to_bytes = u32_to_bytes;
 
 const with_alpha_factor = ( color, alpha ) => {
   return ( color & 0xffffff00 ) | ( Math.round( ( color & 0xff ) * alpha ) & 0xff );
@@ -217,7 +215,6 @@ export class ByteBuffer {
     this._u8Array = new Uint8Array( this._arrayBuffer );
   }
 }
-window.ByteBuffer = ByteBuffer;
 
 export class Affine {
   constructor( a00, a10, a01, a11, a02, a12 ) {
@@ -1280,98 +1277,93 @@ export default class Encoding {
       }
     } );
 
-    // TODO: typed array (we'll need to convert it later)
-    const data = [];
+
     const layout = new Layout();
     layout.n_paths = this.n_paths;
     layout.n_clips = this.n_clips;
 
     const sceneBufferSizes = new SceneBufferSizes( this );
-    // data.reserve(buffer_size);
     const buffer_size = sceneBufferSizes.buffer_size;
     const path_tag_padded = sceneBufferSizes.path_tag_padded;
 
+    const dataBuf = new ByteBuffer( sceneBufferSizes.buffer_size );
+
     // Path tag stream
-    layout.path_tag_base = size_to_words( data.length );
-    data.push( ...this.pathTagsBuf.u8Array );
+    layout.path_tag_base = size_to_words( dataBuf.byteLength );
+    dataBuf.pushByteBuffer( this.pathTagsBuf );
     // TODO: what if we... just error if there are open clips? Why are we padding the streams to make this work?
     for ( let i = 0; i < this.n_open_clips; i++ ) {
-      data.push( PathTag.PATH );
+      dataBuf.pushU8( PathTag.PATH );
     }
-    // TODO: probably a more elegant way in the future, especially when typed array
-    while ( data.length < path_tag_padded ) {
-      data.push( 0 );
-    }
+    dataBuf.byteLength = path_tag_padded;
 
     // Path data stream
-    layout.path_data_base = size_to_words( data.length );
-    data.push( ...this.pathDataBuf.u8Array );
+    layout.path_data_base = size_to_words( dataBuf.byteLength );
+    dataBuf.pushByteBuffer( this.pathDataBuf );
 
     // Draw tag stream
-    layout.draw_tag_base = size_to_words( data.length );
+    layout.draw_tag_base = size_to_words( dataBuf.byteLength );
     // Bin data follows draw info
     layout.bin_data_start = _.sum( this.drawTagsBuf.u32Array.map( DrawTag.info_size ) );
-    data.push( ...this.drawTagsBuf.u8Array );
+    dataBuf.pushByteBuffer( this.drawTagsBuf );
     for ( let i = 0; i < this.n_open_clips; i++ ) {
-      data.push( ...u32_to_bytes( DrawTag.END_CLIP ) );
+      dataBuf.pushU32( DrawTag.END_CLIP );
     }
 
     // Draw data stream
-    layout.draw_data_base = size_to_words( data.length );
+    layout.draw_data_base = size_to_words( dataBuf.byteLength );
     {
-      // TODO: a bit simpler to just draw all of it in, then do the ramp/image stuff? get it working first
-      let pos = 0;
+      const drawDataOffset = dataBuf.byteLength;
+      dataBuf.pushByteBuffer( this.drawDataBuf );
+
       this.patches.forEach( patch => {
-        if ( pos < patch.draw_data_offset ) {
-          data.push( ...this.drawDataBuf.u8Array.slice( pos, patch.draw_data_offset ) );
-        }
-        pos = patch.draw_data_offset;
+        const byteOffset = drawDataOffset + patch.draw_data_offset;
+        let bytes;
+
         if ( patch.type === 'ramp' ) {
-          data.push( ...u32_to_bytes( ( ( patch.id << 2 ) >>> 0 ) | patch.extend ) );
-          pos += 4;
+          bytes = u32_to_bytes( ( ( patch.id << 2 ) >>> 0 ) | patch.extend );
         }
         else if ( patch.type === 'image' ) {
-          data.push( ...u32_to_bytes( ( patch.image.xy.x << 16 ) >>> 0 | patch.image.xy.y ) );
-          pos += 4;
+          bytes = u32_to_bytes( ( patch.image.xy.x << 16 ) >>> 0 | patch.image.xy.y );
           // TODO: assume the image fit (if not, we'll need to do something else)
         }
         else {
           throw new Error( 'unknown patch type' );
         }
+
+        // Patch data directly into our full output
+        dataBuf.fullU8Array.set( bytes, byteOffset );
       } );
-      if ( pos < this.drawDataBuf.byteLength ) {
-        data.push( ...this.drawDataBuf.u8Array.slice( pos ) );
-      }
     }
 
     // Transform stream
-    layout.transform_base = size_to_words( data.length );
-    data.push( ...( _.flatten( this.transforms.map( transform => {
-      return [
-        ...f32_to_bytes( transform.a00 ),
-        ...f32_to_bytes( transform.a10 ),
-        ...f32_to_bytes( transform.a01 ),
-        ...f32_to_bytes( transform.a11 ),
-        ...f32_to_bytes( transform.a02 ),
-        ...f32_to_bytes( transform.a12 )
-      ];
-    } ) ) ) );
+    layout.transform_base = size_to_words( dataBuf.byteLength );
+    for ( let i = 0; i < this.transforms.length; i++ ) {
+      const transform = this.transforms[ i ];
+      dataBuf.pushF32( transform.a00 );
+      dataBuf.pushF32( transform.a10 );
+      dataBuf.pushF32( transform.a01 );
+      dataBuf.pushF32( transform.a11 );
+      dataBuf.pushF32( transform.a02 );
+      dataBuf.pushF32( transform.a12 );
+    }
 
     // Linewidth stream
-    layout.linewidth_base = size_to_words( data.length );
-    data.push( ...( _.flatten( this.linewidths.map( f32_to_bytes ) ) ) );
+    layout.linewidth_base = size_to_words( dataBuf.byteLength );
+    for ( let i = 0; i < this.linewidths.length; i++ ) {
+      dataBuf.pushF32( this.linewidths[ i ] );
+    }
 
     layout.n_draw_objects = layout.n_paths;
 
-    if ( data.length !== buffer_size ) {
+    if ( dataBuf.byteLength !== buffer_size ) {
       throw new Error( 'buffer size mismatch' );
     }
 
     return {
-      packed: new Uint8Array( data ),
+      packed: dataBuf.u8Array,
       layout: layout,
 
-      // TODO: ramp_cache.ramps(), image_cache.images()
       ramps: {
         width: numRamps === 0 ? 0 : NUM_RAMP_SAMPLES,
         height: numRamps,
