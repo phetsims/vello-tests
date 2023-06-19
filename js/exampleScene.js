@@ -1,12 +1,14 @@
+import getTextEncoding from './getTextEncoding.js';
 import SceneFrame from './SceneFrame.js';
 import { default as Encoding, Affine, Extend, ColorStop, ImageStub, Mix, Compose } from './Encoding.js';
-import WASMEncoding from './WASMEncoding.js';
+// import WASMEncoding from './WASMEncoding.js';
 
 let demoImage;
 
 const exampleScene = ( scale ) => {
 
-  const EncodingType = true ? Encoding : WASMEncoding;
+  // const EncodingType = true ? Encoding : WASMEncoding;
+  const EncodingType = Encoding;
 
   // Wait for WASM to be ready
   if ( !demoImage ) {
@@ -143,18 +145,6 @@ const exampleScene = ( scale ) => {
   encoding.finish( true );
   encoding.encode_image( demoImage );
 
-  // For a layer push: matrix, linewidth(-1), shape, begin_clip
-  // encoding.encode_transform( new Affine( 1, 0, 0, 1, 0, 0 ) );
-  // encoding.encode_linewidth( -1 );
-  // encoding.encode_path( true );
-  // encoding.move_to( 0, 0 );
-  // encoding.line_to( 512, 0 );
-  // encoding.line_to( 256, 256 );
-  // encoding.line_to( 0, 512 );
-  // encoding.close();
-  // encoding.finish( true );
-  // encoding.encode_begin_clip( Mix.Normal, Compose.SrcOver, 0.5 );
-
   encoding.encode_transform( new Affine( c, -s, s, c, 200, 400 ) );
   encoding.encode_linewidth( -1 );
   encoding.encode_path( true );
@@ -170,14 +160,37 @@ const exampleScene = ( scale ) => {
     new ColorStop( 1, 0x00ff00ff )
   ], Extend.Pad );
 
-  // encoding.encode_end_clip();
+  // For a layer push: matrix, linewidth(-1), shape, begin_clip
+  encoding.encode_transform( new Affine( 1, 0, 0, 1, 0, 0 ) );
+  encoding.encode_linewidth( -1 );
+  encoding.encode_path( true );
+  encoding.move_to( 0, 0 );
+  encoding.line_to( 512, 0 );
+  encoding.line_to( 256, 256 );
+  encoding.line_to( 0, 512 );
+  encoding.close();
+  encoding.finish( true );
+  encoding.encode_begin_clip( Mix.Normal, Compose.SrcOver, 0.5 );
 
-  // const textScale = 40 + 10 * Math.sin( Date.now() / 1000 );
-  // const textEncoding = getTextEncoding( 'How is this text? No hints!', shaping.Direction.LTR );
-  // if ( !textEncoding.is_empty() ) {
-  //   encoding.append_with_transform( textEncoding, textScale, 0, 0, textScale, 5, 400 );
-  //   encoding.color( 0x330000ff );
-  // }
+  encoding.encode_transform( new Affine( 3, 0, 0, 3, 50, 150 ) );
+  encoding.encode_linewidth( -1 );
+  // TODO: inspect tolerance function and see if our subdivisions are good
+  encoding.encode_kite_shape( new phet.kite.Shape( 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' ), true, true, 0.00001 );
+  encoding.encode_color( 0xff00ff66 );
+
+  encoding.encode_transform( new Affine( 3, 0, 0, 3, 50, 150 ) );
+  encoding.encode_linewidth( 1 );
+  encoding.encode_kite_shape( new phet.kite.Shape( 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' ), false, true, 0.00001 );
+  encoding.encode_color( 0x000000ff );
+
+  encoding.encode_end_clip();
+
+  const textScale = 40 + 10 * Math.sin( Date.now() / 1000 );
+  const textEncoding = getTextEncoding( 'How is this text? No hints!', shaping.Direction.LTR );
+  if ( !textEncoding.is_empty() ) {
+    encoding.append( textEncoding, new Affine( textScale, 0, 0, textScale, 5, 400 ) );
+    encoding.encode_color( 0x330000ff );
+  }
 
   const testIntermediateEncoding = new EncodingType();
   testIntermediateEncoding.append( encoding );

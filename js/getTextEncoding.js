@@ -1,4 +1,4 @@
-import { VelloEncoding } from "../pkg/vello_tests.js";
+import { default as Encoding, Affine } from './Encoding.js';
 
 // user permissions request is likely a non-starter
 // const fonts = await window.queryLocalFonts();
@@ -18,7 +18,7 @@ scriptData.default = {
 };
 const shapeText = ( text, direction ) => shaping.shapeRuns( text, direction, scriptData );
 
-// glyphEncodingMap[ font ][ index ] = VelloEncoding;
+// glyphEncodingMap[ font ][ index ] = Encoding;
 // NOTE: for fills only
 const glyphEncodingMap = {};
 const getGlyphEncoding = ( font, index ) => {
@@ -28,25 +28,20 @@ const getGlyphEncoding = ( font, index ) => {
   if ( glyphEncodingMap[ font ][ index ] === undefined ) {
     const glyph = shaping.getGlyph( font, index );
 
-    const svgPathData = glyph.getSVGPath();
-    if ( svgPathData ) {
-      const encoding = new VelloEncoding();
+    const encoding = new Encoding();
 
-      encoding.svg_path( true, false, svgPathData );
+    // TODO: tolerance?
+    encoding.encode_kite_shape( glyph, true, false, 0.01 );
 
-      glyphEncodingMap[ font ][ index ] = encoding;
-    }
-    else {
-      // empty, like whitespace
-      glyphEncodingMap[ font ][ index ] = null;
-    }
+    glyphEncodingMap[ font ][ index ] = encoding;
   }
   return glyphEncodingMap[ font ][ index ];
 };
+// TODO: allow both encoding types!
 const getTextEncoding = ( text, direction ) => {
   const shapedText = shapeText( text, direction );
 
-  const encoding = new VelloEncoding();
+  const encoding = new Encoding();
   let hasEncodedGlyph = false;
 
   shapedText.glyphs.forEach( glyph => {
@@ -55,8 +50,8 @@ const getTextEncoding = ( text, direction ) => {
     if ( glyphEncoding ) {
       hasEncodedGlyph = true;
 
-      encoding.matrix( 1, 0, 0, 1, glyph.x, glyph.y );
-      encoding.linewidth( -1 );
+      encoding.encode_transform( new Affine( 1, 0, 0, 1, glyph.x, glyph.y ) );
+      encoding.encode_linewidth( -1 );
 
       encoding.append( glyphEncoding );
     }

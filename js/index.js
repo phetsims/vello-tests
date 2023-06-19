@@ -3,7 +3,8 @@
 import Shader from "./Shader.js";
 import exampleScene from "./exampleScene.js";
 import render from "./render.js";
-import wasmInit from "../pkg/vello_tests.js";
+// import wasmInit from "../pkg/vello_tests.js";
+const wasmInit = () => Promise.resolve( { memory: {} } ); // stub TODO remove
 
 // Workaround for old namespacing
 window.kite = phet.kite;

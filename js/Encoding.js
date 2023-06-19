@@ -184,6 +184,7 @@ const lerp_rgba8 = ( c1, c2, t ) => {
   return ( ( r << 24 ) | ( g << 16 ) | ( b << 8 ) | a ) >>> 0;
 }
 
+// TODO: optimize minimizing this. It and u32_to_bytes is our performance killer omg
 const make_ramp = ( colorStops, numSamples ) => {
   let last_u = 0.0;
   let last_c = colorStops[ 0 ].color;
@@ -900,12 +901,80 @@ export default class Encoding {
       }
       this.n_path_segments += this.n_encoded_segments;
       if ( insert_path_marker ) {
-        this.path_tags.push( PathTag.PATH );
-        this.n_paths += 1;
+        this.insert_path_marker();
       }
     }
     return this.n_encoded_segments;
   }
+
+  // Exposed for glyph handling
+  insert_path_marker() {
+    this.path_tags.push( PathTag.PATH );
+    this.n_paths += 1;
+  }
+
+  // To encode a kite shape, we'll need to split arcs/elliptical-arcs into bezier curves
+  // TODO: don't keep Kite things in here, we'd move it to Kite
+  encode_kite_shape( shape, isFill, insertPathMarker, tolerance ) {
+    this.encode_path( isFill );
+
+    shape.subpaths.forEach( subpath => {
+      if ( subpath.isDrawable() ) {
+        const startPoint = subpath.getFirstSegment().start;
+        this.move_to( startPoint.x, startPoint.y );
+
+        subpath.segments.forEach( segment => {
+          if ( segment instanceof phet.kite.Line ) {
+            this.line_to( segment.end.x, segment.end.y );
+          }
+          else if ( segment instanceof phet.kite.Quadratic ) {
+            this.quad_to( segment.control.x, segment.control.y, segment.end.x, segment.end.y );
+          }
+          else if ( segment instanceof phet.kite.Cubic ) {
+            this.cubic_to( segment.control1.x, segment.control1.y, segment.control2.x, segment.control2.y, segment.end.x, segment.end.y );
+          }
+          else {
+            // arc or elliptical arc, split with kurbo's setup (not the most optimal).
+            // See https://raphlinus.github.io/curves/2021/03/11/bezier-fitting.html for better.
+
+            const maxRadius = segment instanceof phet.kite.Arc ? segment.radius : Math.max( segment.radiusX, segment.radiusY );
+            const scaled_err = maxRadius / tolerance;
+            const n_err = Math.max( Math.pow( 1.1163 * scaled_err, 1 / 6 ), 3.999999 );
+            const n = Math.ceil( n_err * Math.abs( segment.getAngleDifference() ) * ( 1.0 / ( 2.0 * Math.PI ) ) );
+
+            // For now, evenly subdivide
+            const segments = n > 1 ? segment.subdivisions( _.range( 1, n ).map( t => t / n ) ) : [ segment ];
+
+            // Create cubics approximations for each segment
+            // TODO: performance optimize?
+            segments.forEach( subSegment => {
+              const start = subSegment.start;
+              const middle = subSegment.positionAt( 0.5 );
+              const end = subSegment.end;
+
+              // 1/4 start, 1/4 end, 1/2 control, find the control point given the middle (t=0.5) point
+              // average + 2 * ( middle - average ) => 2 * middle - average => 2 * middle - ( start + end ) / 2
+
+              // const average = start.average( end );
+              // const control = average.plus( middle.minus( average ).timesScalar( 2 ) );
+
+              // mutates middle also
+              const control = start.plus( end ).multiplyScalar( -0.5 ).add( middle.multiplyScalar( 2 ) );
+
+              this.quad_to( control.x, control.y, end.x, end.y );
+            } );
+          }
+        } );
+
+        if ( subpath.closed ) {
+          this.close();
+        }
+      }
+    } );
+
+    this.finish( insertPathMarker );
+  };
+
 
   /// Encodes a solid color brush.
   encode_color( color ) {
