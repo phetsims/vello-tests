@@ -124,6 +124,12 @@ export class ByteBuffer {
   get u8Array() {
     return new Uint8Array( this._arrayBuffer, 0, this._byteLength );
   }
+  get u32Array() {
+    return new Uint32Array( this._arrayBuffer, 0, this._byteLength / 4 );
+  }
+  get f32Array() {
+    return new Float32Array( this._arrayBuffer, 0, this._byteLength / 4 );
+  }
 
   clear() {
     this._byteLength = 0;
@@ -506,7 +512,7 @@ export class SceneBufferSizes {
     /// Full size of the scene buffer in bytes.
     this.buffer_size = this.path_tag_padded
       + encoding.pathDataBuf.byteLength // u8
-      + ( encoding.draw_tags.length + encoding.n_open_clips ) * 4 // u32 in rust
+      + encoding.drawTagsBuf.byteLength + encoding.n_open_clips * 4 // u32 in rust
       + encoding.drawDataBuf.byteLength // u8
       + encoding.transforms.length * 6 * 4 // 6xf32
       + encoding.linewidths.length * 4; // f32
@@ -761,7 +767,7 @@ export default class Encoding {
     /// The path data stream.
     this.pathDataBuf = new ByteBuffer(); // path_data
     /// The draw tag stream.
-    this.draw_tags = []; // Vec<DrawTag> e.g. u32 in rust, number[] in js
+    this.drawTagsBuf = new ByteBuffer(); // draw_tags // NOTE: was u32 array (effectively) in rust
     /// The draw data stream.
     this.drawDataBuf = new ByteBuffer(); // draw_data
     /// The transform stream.
@@ -805,7 +811,7 @@ export default class Encoding {
     this.pathDataBuf.clear();
     this.linewidths.length = 0;
     this.drawDataBuf.clear();
-    this.draw_tags.length = 0;
+    this.drawTagsBuf.clear();
     this.n_paths = 0;
     this.n_path_segments = 0;
     this.n_clips = 0;
@@ -824,7 +830,7 @@ export default class Encoding {
 
     this.pathTagsBuf.pushByteBuffer( other.pathTagsBuf );
     this.pathDataBuf.pushByteBuffer( other.pathDataBuf );
-    this.draw_tags.push( ...other.draw_tags );
+    this.drawTagsBuf.pushByteBuffer( other.drawTagsBuf );
     this.drawDataBuf.pushByteBuffer( other.drawDataBuf );
     this.n_paths += other.n_paths;
     this.n_path_segments += other.n_path_segments;
@@ -1082,7 +1088,7 @@ export default class Encoding {
 
   /// Encodes a solid color brush.
   encode_color( color ) {
-    this.draw_tags.push( DrawTag.COLOR );
+    this.drawTagsBuf.pushU32( DrawTag.COLOR );
     this.drawDataBuf.pushU32( to_premul_u32( color ) );
   }
 
@@ -1124,7 +1130,7 @@ export default class Encoding {
       this.encode_color( 0 );
     }
     else if ( result === true ) {
-      this.draw_tags.push( DrawTag.LINEAR_GRADIENT );
+      this.drawTagsBuf.pushU32( DrawTag.LINEAR_GRADIENT );
       this.drawDataBuf.pushU32( 0 ); // ramp index, will get filled in
       this.drawDataBuf.pushF32( x0 );
       this.drawDataBuf.pushF32( y0 );
@@ -1150,7 +1156,7 @@ export default class Encoding {
         this.encode_color( 0 );
       }
       else if ( result === true ) {
-        this.draw_tags.push( DrawTag.RADIAL_GRADIENT );
+        this.drawTagsBuf.pushU32( DrawTag.RADIAL_GRADIENT );
         this.drawDataBuf.pushU32( 0 ); // ramp index, will get filled in
         this.drawDataBuf.pushF32( x0 );
         this.drawDataBuf.pushF32( y0 );
@@ -1172,7 +1178,7 @@ export default class Encoding {
       draw_data_offset: this.drawDataBuf.byteLength,
       image: image
     } );
-    this.draw_tags.push( DrawTag.IMAGE );
+    this.drawTagsBuf.pushU32( DrawTag.IMAGE );
 
     // packed atlas coordinates (xy) u32
     this.drawDataBuf.pushU32( 0 );
@@ -1183,7 +1189,7 @@ export default class Encoding {
 
   /// Encodes a begin clip command.
   encode_begin_clip( mix, compose, alpha ) {
-    this.draw_tags.push( DrawTag.BEGIN_CLIP );
+    this.drawTagsBuf.pushU32( DrawTag.BEGIN_CLIP );
 
     // u32 combination of mix and compose
     this.drawDataBuf.pushU32( ( ( mix << 8 ) >>> 0 ) | compose );
@@ -1196,7 +1202,7 @@ export default class Encoding {
   /// Encodes an end clip command.
   encode_end_clip() {
     if ( this.n_open_clips > 0 ) {
-      this.draw_tags.push( DrawTag.END_CLIP );
+      this.drawTagsBuf.pushU32( DrawTag.END_CLIP );
       // This is a dummy path, and will go away with the new clip impl.
       this.pathTagsBuf.pushU8( PathTag.PATH );
       this.n_paths += 1;
@@ -1217,7 +1223,7 @@ export default class Encoding {
   print_debug() {
     console.log( `path_tags\n${this.pathTagsBuf.u8Array.map( x => x.toString() ).join( ', ' )}` );
     console.log( `path_data\n${this.pathDataBuf.u8Array.map( x => x.toString() ).join( ', ' )}` );
-    console.log( `draw_tags\n${this.draw_tags.map( x => x.toString() ).join( ', ' )}` );
+    console.log( `draw_tags\n${this.drawTagsBuf.u8Array.map( x => x.toString() ).join( ', ' )}` );
     console.log( `draw_data\n${this.drawDataBuf.u8Array.map( x => x.toString() ).join( ', ' )}` );
     console.log( `transforms\n${this.transforms.map( x => `_ a00:${x.a00} a10:${x.a10} a01:${x.a01} a11:${x.a11} a02:${x.a02} a12:${x.a12}_` ).join( '\n' )}` );
     console.log( `linewidths\n${this.linewidths.map( x => x.toString() ).join( ', ' )}` );
@@ -1304,8 +1310,8 @@ export default class Encoding {
     // Draw tag stream
     layout.draw_tag_base = size_to_words( data.length );
     // Bin data follows draw info
-    layout.bin_data_start = _.sum( this.draw_tags.map( DrawTag.info_size ) );
-    data.push( ...( _.flatten( this.draw_tags.map( u32_to_bytes ) ) ) );
+    layout.bin_data_start = _.sum( this.drawTagsBuf.u32Array.map( DrawTag.info_size ) );
+    data.push( ...this.drawTagsBuf.u8Array );
     for ( let i = 0; i < this.n_open_clips; i++ ) {
       data.push( ...u32_to_bytes( DrawTag.END_CLIP ) );
     }
