@@ -1,8 +1,9 @@
+import Render from './render.js';
 import SceneFrame from './SceneFrame.js';
 import { VelloEncoding, VelloMix, VelloCompose } from "../pkg/vello_tests.js";
 import { addImage } from './imageMap.js';
 import getTextEncoding from './getTextEncoding.js';
-import { default as Encoding, Affine, Extend, ColorStop, ImageStub, Mix, Compose } from './Encoding.js';
+import { default as Encoding, Affine, Extend, ColorStop, ImageStub, Mix, Compose, RenderConfig } from './Encoding.js';
 
 let demoImage;
 
@@ -37,12 +38,15 @@ const exampleScene = ( scale ) => {
     console.log( '|||||||||||||||| JS encoding' );
     jsEncoding.print_debug();
 
-    // TODO: RenderConfig
-    const renderInfo = wasmEncoding.render( 512, 512, 0x666666ff );
+    // TODO: keep both for testing, have an API that sends same commands to both
+
+    // TODO: ramp and premultiply is causing things to be 1-off sometimes. Make it fully reproducible
+
+    const wasmRenderConfig = wasmEncoding.render( 512, 512, 0x666666ff );
 
     console.log( '################ WASM scene' );
-    console.log( [ ...renderInfo.scene() ] );
-    console.log( 'ramps', renderInfo.ramps_width, renderInfo.ramps_height, [ ...renderInfo.ramps() ] );
+    console.log( [ ...wasmRenderConfig.scene() ] );
+    console.log( 'ramps', wasmRenderConfig.ramps_width, wasmRenderConfig.ramps_height, [ ...wasmRenderConfig.ramps() ] );
 
     const resolved = jsEncoding.resolve();
     console.log( '################ JS scene' );
@@ -52,10 +56,150 @@ const exampleScene = ( scale ) => {
     console.log( resolved.images );
 
     console.log( '################' );
-    console.log( `scene ok: ${_.isEqual( [ ...renderInfo.scene() ], [ ...resolved.packed ] )}` );
-    console.log( `max diff: ${_.max( _.zip( [ ...renderInfo.scene() ], [ ...resolved.packed ] ).map( arr => arr[ 0 ] - arr[ 1 ] ) )}` );
-    console.log( `ramps ok: ${_.isEqual( [ ...renderInfo.ramps() ], [ ...resolved.ramps.data ] )}` );
-    console.log( `max diff: ${_.max( _.zip( [ ...renderInfo.ramps() ], [ ...resolved.ramps.data ] ).map( arr => arr[ 0 ] - arr[ 1 ] ) )}` );
+    console.log( `scene ok: ${_.isEqual( [ ...wasmRenderConfig.scene() ], [ ...resolved.packed ] )}` );
+    console.log( `max diff: ${_.max( _.zip( [ ...wasmRenderConfig.scene() ], [ ...resolved.packed ] ).map( arr => arr[ 0 ] - arr[ 1 ] ) )}` );
+    console.log( `ramps ok: ${_.isEqual( [ ...wasmRenderConfig.ramps() ], [ ...resolved.ramps.data ] )}` );
+    console.log( `max diff: ${_.max( _.zip( [ ...wasmRenderConfig.ramps() ], [ ...resolved.ramps.data ] ).map( arr => arr[ 0 ] - arr[ 1 ] ) )}` );
+
+    const jsRenderConfig = new RenderConfig( resolved.layout, 512, 512, 0x666666ff );
+
+
+
+    const wasmWorkgroupCounts = wasmRenderConfig.workgroup_counts();
+    const wasmBufferSizes = wasmRenderConfig.buffer_sizes();
+    const wasmConfigBytes = wasmRenderConfig.config_bytes();
+
+    const jsConfigBytes = jsRenderConfig.config_bytes;
+
+    console.log( '################ WASM config' );
+
+    console.log( `config_bytes: ${[ ...wasmConfigBytes ]}` );
+    // console.log( `workgroup_counts.use_large_path_scan: ${wasmWorkgroupCounts.use_large_path_scan}` );
+    // console.log( `workgroup_counts.path_reduce: [${wasmWorkgroupCounts.path_reduce.x}, ${wasmWorkgroupCounts.path_reduce.y}, ${wasmWorkgroupCounts.path_reduce.z}]` );
+    // console.log( `workgroup_counts.path_reduce2: [${wasmWorkgroupCounts.path_reduce2.x}, ${wasmWorkgroupCounts.path_reduce2.y}, ${wasmWorkgroupCounts.path_reduce2.z}]` );
+    // console.log( `workgroup_counts.path_scan1: [${wasmWorkgroupCounts.path_scan1.x}, ${wasmWorkgroupCounts.path_scan1.y}, ${wasmWorkgroupCounts.path_scan1.z}]` );
+    // console.log( `workgroup_counts.path_scan: [${wasmWorkgroupCounts.path_scan.x}, ${wasmWorkgroupCounts.path_scan.y}, ${wasmWorkgroupCounts.path_scan.z}]` );
+    // console.log( `workgroup_counts.bbox_clear: [${wasmWorkgroupCounts.bbox_clear.x}, ${wasmWorkgroupCounts.bbox_clear.y}, ${wasmWorkgroupCounts.bbox_clear.z}]` );
+    // console.log( `workgroup_counts.path_seg: [${wasmWorkgroupCounts.path_seg.x}, ${wasmWorkgroupCounts.path_seg.y}, ${wasmWorkgroupCounts.path_seg.z}]` );
+    // console.log( `workgroup_counts.draw_reduce: [${wasmWorkgroupCounts.draw_reduce.x}, ${wasmWorkgroupCounts.draw_reduce.y}, ${wasmWorkgroupCounts.draw_reduce.z}]` );
+    // console.log( `workgroup_counts.draw_leaf: [${wasmWorkgroupCounts.draw_leaf.x}, ${wasmWorkgroupCounts.draw_leaf.y}, ${wasmWorkgroupCounts.draw_leaf.z}]` );
+    // console.log( `workgroup_counts.clip_reduce: [${wasmWorkgroupCounts.clip_reduce.x}, ${wasmWorkgroupCounts.clip_reduce.y}, ${wasmWorkgroupCounts.clip_reduce.z}]` );
+    // console.log( `workgroup_counts.clip_leaf: [${wasmWorkgroupCounts.clip_leaf.x}, ${wasmWorkgroupCounts.clip_leaf.y}, ${wasmWorkgroupCounts.clip_leaf.z}]` );
+    // console.log( `workgroup_counts.binning: [${wasmWorkgroupCounts.binning.x}, ${wasmWorkgroupCounts.binning.y}, ${wasmWorkgroupCounts.binning.z}]` );
+    // console.log( `workgroup_counts.tile_alloc: [${wasmWorkgroupCounts.tile_alloc.x}, ${wasmWorkgroupCounts.tile_alloc.y}, ${wasmWorkgroupCounts.tile_alloc.z}]` );
+    // console.log( `workgroup_counts.path_coarse: [${wasmWorkgroupCounts.path_coarse.x}, ${wasmWorkgroupCounts.path_coarse.y}, ${wasmWorkgroupCounts.path_coarse.z}]` );
+    // console.log( `workgroup_counts.backdrop: [${wasmWorkgroupCounts.backdrop.x}, ${wasmWorkgroupCounts.backdrop.y}, ${wasmWorkgroupCounts.backdrop.z}]` );
+    // console.log( `workgroup_counts.coarse: [${wasmWorkgroupCounts.coarse.x}, ${wasmWorkgroupCounts.coarse.y}, ${wasmWorkgroupCounts.coarse.z}]` );
+    // console.log( `workgroup_counts.fine: [${wasmWorkgroupCounts.fine.x}, ${wasmWorkgroupCounts.fine.y}, ${wasmWorkgroupCounts.fine.z}]` );
+
+    // console.log( `buffer_sizes.path_reduced.size_in_bytes: ${wasmBufferSizes.path_reduced.size_in_bytes}` );
+    // console.log( `buffer_sizes.path_reduced2.size_in_bytes: ${wasmBufferSizes.path_reduced2.size_in_bytes}` );
+    // console.log( `buffer_sizes.path_reduced_scan.size_in_bytes: ${wasmBufferSizes.path_reduced_scan.size_in_bytes}` );
+    // console.log( `buffer_sizes.path_monoids.size_in_bytes: ${wasmBufferSizes.path_monoids.size_in_bytes}` );
+    // console.log( `buffer_sizes.path_bboxes.size_in_bytes: ${wasmBufferSizes.path_bboxes.size_in_bytes}` );
+    // console.log( `buffer_sizes.cubics.size_in_bytes: ${wasmBufferSizes.cubics.size_in_bytes}` );
+    // console.log( `buffer_sizes.draw_reduced.size_in_bytes: ${wasmBufferSizes.draw_reduced.size_in_bytes}` );
+    // console.log( `buffer_sizes.draw_monoids.size_in_bytes: ${wasmBufferSizes.draw_monoids.size_in_bytes}` );
+    console.log( `buffer_sizes.info.size_in_bytes: ${wasmBufferSizes.info.size_in_bytes}` );
+    // console.log( `buffer_sizes.clip_inps.size_in_bytes: ${wasmBufferSizes.clip_inps.size_in_bytes}` );
+    // console.log( `buffer_sizes.clip_els.size_in_bytes: ${wasmBufferSizes.clip_els.size_in_bytes}` );
+    // console.log( `buffer_sizes.clip_bics.size_in_bytes: ${wasmBufferSizes.clip_bics.size_in_bytes}` );
+    // console.log( `buffer_sizes.clip_bboxes.size_in_bytes: ${wasmBufferSizes.clip_bboxes.size_in_bytes}` );
+    // console.log( `buffer_sizes.draw_bboxes.size_in_bytes: ${wasmBufferSizes.draw_bboxes.size_in_bytes}` );
+    // console.log( `buffer_sizes.bump_alloc.size_in_bytes: ${wasmBufferSizes.bump_alloc.size_in_bytes}` );
+    // console.log( `buffer_sizes.bin_headers.size_in_bytes: ${wasmBufferSizes.bin_headers.size_in_bytes}` );
+    // console.log( `buffer_sizes.paths.size_in_bytes: ${wasmBufferSizes.paths.size_in_bytes}` );
+    // console.log( `buffer_sizes.bin_data.size_in_bytes: ${wasmBufferSizes.bin_data.size_in_bytes}` );
+    // console.log( `buffer_sizes.tiles.size_in_bytes: ${wasmBufferSizes.tiles.size_in_bytes}` );
+    // console.log( `buffer_sizes.segments.size_in_bytes: ${wasmBufferSizes.segments.size_in_bytes}` );
+    // console.log( `buffer_sizes.ptcl.size_in_bytes: ${wasmBufferSizes.ptcl.size_in_bytes}` );
+
+    console.log( `gpu.width_in_tiles: ${wasmRenderConfig.config_uniform().width_in_tiles}` );
+    console.log( `gpu.height_in_tiles: ${wasmRenderConfig.config_uniform().height_in_tiles}` );
+    console.log( `gpu.target_width: ${wasmRenderConfig.config_uniform().target_width}` );
+    console.log( `gpu.target_height: ${wasmRenderConfig.config_uniform().target_height}` );
+    console.log( `gpu.base_color: ${wasmRenderConfig.config_uniform().base_color}` );
+
+    console.log( `gpu.layout.n_draw_objects: ${wasmRenderConfig.config_uniform().layout.n_draw_objects}` );
+    console.log( `gpu.layout.n_paths: ${wasmRenderConfig.config_uniform().layout.n_paths}` );
+    console.log( `gpu.layout.n_clips: ${wasmRenderConfig.config_uniform().layout.n_clips}` );
+    console.log( `gpu.layout.bin_data_start: ${wasmRenderConfig.config_uniform().layout.bin_data_start}` );
+    console.log( `gpu.layout.path_tag_base: ${wasmRenderConfig.config_uniform().layout.path_tag_base}` );
+    console.log( `gpu.layout.path_data_base: ${wasmRenderConfig.config_uniform().layout.path_data_base}` );
+    console.log( `gpu.layout.draw_tag_base: ${wasmRenderConfig.config_uniform().layout.draw_tag_base}` );
+    console.log( `gpu.layout.draw_data_base: ${wasmRenderConfig.config_uniform().layout.draw_data_base}` );
+    console.log( `gpu.layout.transform_base: ${wasmRenderConfig.config_uniform().layout.transform_base}` );
+    console.log( `gpu.layout.linewidth_base: ${wasmRenderConfig.config_uniform().layout.linewidth_base}` );
+
+    console.log( `gpu.binning_size: ${wasmRenderConfig.config_uniform().binning_size}` );
+    console.log( `gpu.tiles_size: ${wasmRenderConfig.config_uniform().tiles_size}` );
+    console.log( `gpu.segments_size: ${wasmRenderConfig.config_uniform().segments_size}` );
+    console.log( `gpu.ptcl_size: ${wasmRenderConfig.config_uniform().ptcl_size}` );
+
+    console.log( '################ JS config' );
+
+    console.log( `config_bytes: ${[ ...jsConfigBytes ]}` );
+    // console.log( `workgroup_counts.use_large_path_scan: ${jsRenderConfig.workgroup_counts.use_large_path_scan}` );
+    // console.log( `workgroup_counts.path_reduce: ${jsRenderConfig.workgroup_counts.path_reduce}` );
+    // console.log( `workgroup_counts.path_reduce2: ${jsRenderConfig.workgroup_counts.path_reduce2}` );
+    // console.log( `workgroup_counts.path_scan1: ${jsRenderConfig.workgroup_counts.path_scan1}` );
+    // console.log( `workgroup_counts.path_scan: ${jsRenderConfig.workgroup_counts.path_scan}` );
+    // console.log( `workgroup_counts.bbox_clear: ${jsRenderConfig.workgroup_counts.bbox_clear}` );
+    // console.log( `workgroup_counts.path_seg: ${jsRenderConfig.workgroup_counts.path_seg}` );
+    // console.log( `workgroup_counts.draw_reduce: ${jsRenderConfig.workgroup_counts.draw_reduce}` );
+    // console.log( `workgroup_counts.draw_leaf: ${jsRenderConfig.workgroup_counts.draw_leaf}` );
+    // console.log( `workgroup_counts.clip_reduce: ${jsRenderConfig.workgroup_counts.clip_reduce}` );
+    // console.log( `workgroup_counts.clip_leaf: ${jsRenderConfig.workgroup_counts.clip_leaf}` );
+    // console.log( `workgroup_counts.binning: ${jsRenderConfig.workgroup_counts.binning}` );
+    // console.log( `workgroup_counts.tile_alloc: ${jsRenderConfig.workgroup_counts.tile_alloc}` );
+    // console.log( `workgroup_counts.path_coarse: ${jsRenderConfig.workgroup_counts.path_coarse}` );
+    // console.log( `workgroup_counts.backdrop: ${jsRenderConfig.workgroup_counts.backdrop}` );
+    // console.log( `workgroup_counts.coarse: ${jsRenderConfig.workgroup_counts.coarse}` );
+    // console.log( `workgroup_counts.fine: ${jsRenderConfig.workgroup_counts.fine}` );
+
+    // console.log( `buffer_sizes.path_reduced.size_in_bytes: ${jsRenderConfig.buffer_sizes.path_reduced.size_in_bytes()}` );
+    // console.log( `buffer_sizes.path_reduced2.size_in_bytes: ${jsRenderConfig.buffer_sizes.path_reduced2.size_in_bytes()}` );
+    // console.log( `buffer_sizes.path_reduced_scan.size_in_bytes: ${jsRenderConfig.buffer_sizes.path_reduced_scan.size_in_bytes()}` );
+    // console.log( `buffer_sizes.path_monoids.size_in_bytes: ${jsRenderConfig.buffer_sizes.path_monoids.size_in_bytes()}` );
+    // console.log( `buffer_sizes.path_bboxes.size_in_bytes: ${jsRenderConfig.buffer_sizes.path_bboxes.size_in_bytes()}` );
+    // console.log( `buffer_sizes.cubics.size_in_bytes: ${jsRenderConfig.buffer_sizes.cubics.size_in_bytes()}` );
+    // console.log( `buffer_sizes.draw_reduced.size_in_bytes: ${jsRenderConfig.buffer_sizes.draw_reduced.size_in_bytes()}` );
+    // console.log( `buffer_sizes.draw_monoids.size_in_bytes: ${jsRenderConfig.buffer_sizes.draw_monoids.size_in_bytes()}` );
+    console.log( `buffer_sizes.info.size_in_bytes: ${jsRenderConfig.buffer_sizes.info.size_in_bytes()}` );
+    // console.log( `buffer_sizes.clip_inps.size_in_bytes: ${jsRenderConfig.buffer_sizes.clip_inps.size_in_bytes()}` );
+    // console.log( `buffer_sizes.clip_els.size_in_bytes: ${jsRenderConfig.buffer_sizes.clip_els.size_in_bytes()}` );
+    // console.log( `buffer_sizes.clip_bics.size_in_bytes: ${jsRenderConfig.buffer_sizes.clip_bics.size_in_bytes()}` );
+    // console.log( `buffer_sizes.clip_bboxes.size_in_bytes: ${jsRenderConfig.buffer_sizes.clip_bboxes.size_in_bytes()}` );
+    // console.log( `buffer_sizes.draw_bboxes.size_in_bytes: ${jsRenderConfig.buffer_sizes.draw_bboxes.size_in_bytes()}` );
+    // console.log( `buffer_sizes.bump_alloc.size_in_bytes: ${jsRenderConfig.buffer_sizes.bump_alloc.size_in_bytes()}` );
+    // console.log( `buffer_sizes.bin_headers.size_in_bytes: ${jsRenderConfig.buffer_sizes.bin_headers.size_in_bytes()}` );
+    // console.log( `buffer_sizes.paths.size_in_bytes: ${jsRenderConfig.buffer_sizes.paths.size_in_bytes()}` );
+    // console.log( `buffer_sizes.bin_data.size_in_bytes: ${jsRenderConfig.buffer_sizes.bin_data.size_in_bytes()}` );
+    // console.log( `buffer_sizes.tiles.size_in_bytes: ${jsRenderConfig.buffer_sizes.tiles.size_in_bytes()}` );
+    // console.log( `buffer_sizes.segments.size_in_bytes: ${jsRenderConfig.buffer_sizes.segments.size_in_bytes()}` );
+    // console.log( `buffer_sizes.ptcl.size_in_bytes: ${jsRenderConfig.buffer_sizes.ptcl.size_in_bytes()}` );
+
+    console.log( `gpu.width_in_tiles: ${jsRenderConfig.gpu.width_in_tiles}` );
+    console.log( `gpu.height_in_tiles: ${jsRenderConfig.gpu.height_in_tiles}` );
+    console.log( `gpu.target_width: ${jsRenderConfig.gpu.target_width}` );
+    console.log( `gpu.target_height: ${jsRenderConfig.gpu.target_height}` );
+    console.log( `gpu.base_color: ${jsRenderConfig.gpu.base_color}` );
+
+    console.log( `gpu.layout.n_draw_objects: ${jsRenderConfig.gpu.layout.n_draw_objects}` );
+    console.log( `gpu.layout.n_paths: ${jsRenderConfig.gpu.layout.n_paths}` );
+    console.log( `gpu.layout.n_clips: ${jsRenderConfig.gpu.layout.n_clips}` );
+    console.log( `gpu.layout.bin_data_start: ${jsRenderConfig.gpu.layout.bin_data_start}` );
+    console.log( `gpu.layout.path_tag_base: ${jsRenderConfig.gpu.layout.path_tag_base}` );
+    console.log( `gpu.layout.path_data_base: ${jsRenderConfig.gpu.layout.path_data_base}` );
+    console.log( `gpu.layout.draw_tag_base: ${jsRenderConfig.gpu.layout.draw_tag_base}` );
+    console.log( `gpu.layout.draw_data_base: ${jsRenderConfig.gpu.layout.draw_data_base}` );
+    console.log( `gpu.layout.transform_base: ${jsRenderConfig.gpu.layout.transform_base}` );
+    console.log( `gpu.layout.linewidth_base: ${jsRenderConfig.gpu.layout.linewidth_base}` );
+
+    console.log( `gpu.binning_size: ${jsRenderConfig.gpu.binning_size}` );
+    console.log( `gpu.tiles_size: ${jsRenderConfig.gpu.tiles_size}` );
+    console.log( `gpu.segments_size: ${jsRenderConfig.gpu.segments_size}` );
+    console.log( `gpu.ptcl_size: ${jsRenderConfig.gpu.ptcl_size}` );
   };
 
   const angle = Date.now() / 1000;
