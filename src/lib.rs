@@ -1,5 +1,5 @@
 use wasm_bindgen::prelude::*;
-use vello_encoding::{Encoding, Resolver, RenderConfig, DrawColor, DrawLinearGradient, DrawRadialGradient, Transform, Layout, ConfigUniform, BufferSize, WorkgroupCounts, WorkgroupSize, BufferSizes};
+use vello_encoding::{Encoding, Resolver, RenderConfig, DrawColor, PathTag, DrawLinearGradient, DrawRadialGradient, Transform, Layout, ConfigUniform, BufferSize, WorkgroupCounts, WorkgroupSize, BufferSizes};
 use bytemuck;
 use peniko::{kurbo, Extend, ColorStop, BlendMode};
 
@@ -215,7 +215,7 @@ impl VelloLayout {
 
 // TODO: Find a way to wasm_bindgen that doesn't require duplicating structs
 #[wasm_bindgen]
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct VelloConfigUniform {
     pub width_in_tiles: u32,
     pub height_in_tiles: u32,
@@ -268,7 +268,7 @@ impl VelloWorkgroupSize {
 
 // TODO: Find a way to wasm_bindgen that doesn't require duplicating structs
 #[wasm_bindgen]
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub struct VelloWorkgroupCounts {
     pub use_large_path_scan: bool,
     pub path_reduce: VelloWorkgroupSize,
@@ -289,9 +289,20 @@ pub struct VelloWorkgroupCounts {
     pub fine: VelloWorkgroupSize,
 }
 
+static WORKGROUP_COUNTS_COUNT: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+impl Drop for VelloWorkgroupCounts {
+    fn drop(&mut self) {
+        let count = WORKGROUP_COUNTS_COUNT.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
+        // web_sys::console::log_1( &JsValue::from( format!( "drop VelloWorkgroupCounts {count}" ) ) );
+    }
+}
+
 impl VelloWorkgroupCounts {
     // convert WorkgroupCounts to VelloWorkgroupCounts
     pub fn from_config_uniform(workgroup_counts: WorkgroupCounts) -> VelloWorkgroupCounts {
+        let count = WORKGROUP_COUNTS_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        // web_sys::console::log_1( &JsValue::from( format!( "new VelloWorkgroupCounts {count}" ) ) );
         VelloWorkgroupCounts {
             use_large_path_scan: workgroup_counts.use_large_path_scan,
             path_reduce: VelloWorkgroupSize::from_tuple( workgroup_counts.path_reduce ),
@@ -444,10 +455,22 @@ pub struct VelloEncoding {
     encoding: Encoding
 }
 
+static VELLO_ENCODING_COUNTER: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+impl Drop for VelloEncoding {
+    fn drop(&mut self) {
+        let count = VELLO_ENCODING_COUNTER.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
+        // web_sys::console::log_1( &JsValue::from( format!( "drop VelloEncoding {count}" ) ) );
+    }
+}
+
 #[wasm_bindgen]
 impl VelloEncoding {
     #[wasm_bindgen(constructor)]
     pub fn new() -> VelloEncoding {
+        let count = VELLO_ENCODING_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        // web_sys::console::log_1( &JsValue::from( format!( "new VelloEncoding {count}" ) ) );
+
         VelloEncoding {
             encoding: Encoding::new()
         }
@@ -485,6 +508,10 @@ impl VelloEncoding {
         self.encoding.reset( is_fragment );
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.encoding.is_empty()
+    }
+
     pub fn linewidth(&mut self, linewidth: f32) {
         self.encoding.encode_linewidth( linewidth );
     }
@@ -496,10 +523,17 @@ impl VelloEncoding {
         } );
     }
 
-    pub fn svg_path(&mut self, is_fill: bool, path: String ) {
+    pub fn svg_path(&mut self, is_fill: bool, insert_path_marker: bool, path: String ) -> bool {
         let path = kurbo::BezPath::from_svg( &path.as_str() ).unwrap();
 
-        self.encoding.encode_shape(&path, is_fill);
+        let mut encoder = self.encoding.encode_path(is_fill);
+        encoder.shape(&path);
+        encoder.finish(insert_path_marker) != 0
+    }
+
+    pub fn insert_path_marker(&mut self) {
+        self.encoding.path_tags.push(PathTag::PATH);
+        self.encoding.n_paths += 1;
     }
 
     // wasm_bindgen REALLY doesn't like lifetimes, I fought a battle to create a Path wrapper struct
@@ -517,7 +551,7 @@ impl VelloEncoding {
     //   { type: 'LineTo', x: -100, y: 100 },
     //   { type: 'LineTo', x: -100, y: -100 }
     // ]
-    pub fn json_path(&mut self, is_fill: bool, insert_path_marker: bool, json: String ) {
+    pub fn json_path(&mut self, is_fill: bool, insert_path_marker: bool, json: String ) -> bool {
         // web_sys::console::log_1( &json.as_str().into() );
 
         let mut path_encoder = self.encoding.encode_path( is_fill );
@@ -589,7 +623,7 @@ impl VelloEncoding {
             _ => panic!("Non-array")
         }
 
-        path_encoder.finish( insert_path_marker );
+        path_encoder.finish( insert_path_marker ) != 0
     }
 
     pub fn color(&mut self, rgba: u32) {
@@ -616,7 +650,8 @@ impl VelloEncoding {
         } );
     }
 
-    pub fn radial_gradient(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, r0: f32, r1: f32, alpha: f32, extend: u8, offsets: js_sys::Float32Array, colors: js_sys::Uint32Array ) {
+    // TODO: change the parameter order here. it's confusing, and matches nothing
+    pub fn radial_gradient(&mut self, x0: f32, y0: f32, r0: f32, x1: f32, y1: f32, r1: f32, alpha: f32, extend: u8, offsets: js_sys::Float32Array, colors: js_sys::Uint32Array ) {
         self.encoding.encode_radial_gradient( DrawRadialGradient {
             index: 0,
             p0: [ x0, y0 ],
@@ -658,7 +693,7 @@ impl VelloEncoding {
 
     pub fn finalize_scene(&mut self) {
         // Dummy path to make the previous paths show up (since we're a fill with no area, it shouldn't show up)
-        self.svg_path(true, String::from("M 0 0 L 1 0"));
+        self.svg_path(true, true, String::from("M 0 0 L 1 0"));
     }
 
     pub fn render(&mut self, width: u32, height: u32, base_color: u32) -> RenderInfo {
@@ -684,6 +719,20 @@ impl VelloEncoding {
             images_width: images.width,
             images_height: images.height
         }
+    }
+
+    pub fn print_debug(&mut self) {
+        web_sys::console::log_1( &JsValue::from( format!( "path_tags\n{}", self.encoding.path_tags.iter().map(|x| x.0.to_string()).fold(String::new(), |a, b| a + ", " + b.as_str()) ) ) );
+        web_sys::console::log_1( &JsValue::from( format!( "path_data\n{}", self.encoding.path_data.iter().map(|x| x.to_string()).fold(String::new(), |a, b| a + ", " + b.as_str()) ) ) );
+        web_sys::console::log_1( &JsValue::from( format!( "draw_tags\n{}", self.encoding.draw_tags.iter().map(|x| x.0.to_string()).fold(String::new(), |a, b| a + ", " + b.as_str()) ) ) );
+        web_sys::console::log_1( &JsValue::from( format!( "draw_data\n{}", self.encoding.draw_data.iter().map(|x| x.to_string()).fold(String::new(), |a, b| a + ", " + b.as_str()) ) ) );
+        web_sys::console::log_1( &JsValue::from( format!( "transforms\n{}", self.encoding.transforms.iter().map(|x| format!( "_ a00:{} a10:{} a01:{} a11:{} a02:{} a12:{}_", x.matrix[0], x.matrix[1], x.matrix[2], x.matrix[3], x.translation[0], x.translation[1] ) ).fold(String::new(), |a, b| a + "\n" + b.as_str()) ) ) );
+        web_sys::console::log_1( &JsValue::from( format!( "linewidths\n{}", self.encoding.linewidths.iter().map(|x| x.to_string()).fold(String::new(), |a, b| a + ", " + b.as_str()) ) ) );
+        // TODO: resources
+        web_sys::console::log_1( &JsValue::from( format!( "n_paths\n{}", self.encoding.n_paths ) ) );
+        web_sys::console::log_1( &JsValue::from( format!( "n_path_segments\n{}", self.encoding.n_path_segments ) ) );
+        web_sys::console::log_1( &JsValue::from( format!( "n_clips\n{}", self.encoding.n_clips ) ) );
+        web_sys::console::log_1( &JsValue::from( format!( "n_open_clips\n{}", self.encoding.n_open_clips ) ) );
     }
 }
 
