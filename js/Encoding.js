@@ -343,8 +343,6 @@ export class Layout {
 
 const TILE_WIDTH = 16; // u32
 const TILE_HEIGHT = 16; // u32
-
-// TODO: Obtain these from the vello_shaders crate
 const PATH_REDUCE_WG = 256; // u32
 const PATH_BBOX_WG = 256; // u32
 const PATH_COARSE_WG = 256; // u32
@@ -368,32 +366,9 @@ export class SceneBufferSizes {
       + encoding.transforms.length * 6 * 4 // 6xf32
       + encoding.linewidths.length * 4; // f32
 
-    // NOTE: because of not using glyphs, our patch_sizes are effectively zero
-    /*
-            let n_path_tags =
-            encoding.path_tags.len() + patch_sizes.path_tags + encoding.n_open_clips as usize;
-        let path_tag_padded = align_up(n_path_tags, 4 * crate::config::PATH_REDUCE_WG);
-        let buffer_size = path_tag_padded
-            + slice_size_in_bytes(&encoding.path_data, patch_sizes.path_data)
-            + slice_size_in_bytes(
-                &encoding.draw_tags,
-                patch_sizes.draw_tags + encoding.n_open_clips as usize,
-            )
-            + slice_size_in_bytes(&encoding.draw_data, patch_sizes.draw_data)
-            + slice_size_in_bytes(&encoding.transforms, patch_sizes.transforms)
-            + slice_size_in_bytes(&encoding.linewidths, patch_sizes.linewidths);
-        Self {
-            buffer_size,
-            path_tag_padded,
-        }
-     */
+    // NOTE: because of not using the glyphs feature, our patch_sizes are effectively zero
   }
 }
-
-// TODO: It's the byte-size of the slice + extra
-// const slice_size_in_bytes = <T: Sized>(slice: &[T], extra: usize) -> usize {
-//     (slice.len() + extra) * std::mem::size_of::<T>()
-// }
 
 const size_to_words = byte_size => byte_size / 4;
 
@@ -1126,7 +1101,6 @@ export default class Encoding {
     console.log( `draw_data\n${this.draw_data.map( x => x.toString() ).join( ', ' )}` );
     console.log( `transforms\n${this.transforms.map( x => `_ a00:${x.a00} a10:${x.a10} a01:${x.a01} a11:${x.a11} a02:${x.a02} a12:${x.a12}_` ).join( '\n' )}` );
     console.log( `linewidths\n${this.linewidths.map( x => x.toString() ).join( ', ' )}` );
-    // TODO: resources
     console.log( `n_paths\n${this.n_paths}` );
     console.log( `n_path_segments\n${this.n_path_segments}` );
     console.log( `n_clips\n${this.n_clips}` );
