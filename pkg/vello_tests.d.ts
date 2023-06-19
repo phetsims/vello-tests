@@ -346,6 +346,10 @@ export class VelloEncoding {
 */
   reset(is_fragment: boolean): void;
 /**
+* @returns {boolean}
+*/
+  is_empty(): boolean;
+/**
 * @param {number} linewidth
 */
   linewidth(linewidth: number): void;
@@ -360,15 +364,21 @@ export class VelloEncoding {
   matrix(a00: number, a10: number, a01: number, a11: number, a20: number, a21: number): void;
 /**
 * @param {boolean} is_fill
+* @param {boolean} insert_path_marker
 * @param {string} path
+* @returns {boolean}
 */
-  svg_path(is_fill: boolean, path: string): void;
+  svg_path(is_fill: boolean, insert_path_marker: boolean, path: string): boolean;
+/**
+*/
+  insert_path_marker(): void;
 /**
 * @param {boolean} is_fill
 * @param {boolean} insert_path_marker
 * @param {string} json
+* @returns {boolean}
 */
-  json_path(is_fill: boolean, insert_path_marker: boolean, json: string): void;
+  json_path(is_fill: boolean, insert_path_marker: boolean, json: string): boolean;
 /**
 * @param {number} rgba
 */
@@ -387,16 +397,16 @@ export class VelloEncoding {
 /**
 * @param {number} x0
 * @param {number} y0
+* @param {number} r0
 * @param {number} x1
 * @param {number} y1
-* @param {number} r0
 * @param {number} r1
 * @param {number} alpha
 * @param {number} extend
 * @param {Float32Array} offsets
 * @param {Uint32Array} colors
 */
-  radial_gradient(x0: number, y0: number, x1: number, y1: number, r0: number, r1: number, alpha: number, extend: number, offsets: Float32Array, colors: Uint32Array): void;
+  radial_gradient(x0: number, y0: number, r0: number, x1: number, y1: number, r1: number, alpha: number, extend: number, offsets: Float32Array, colors: Uint32Array): void;
 /**
 * @param {number} mix
 * @param {number} compose
@@ -421,6 +431,9 @@ export class VelloEncoding {
 * @returns {RenderInfo}
 */
   render(width: number, height: number, base_color: number): RenderInfo;
+/**
+*/
+  print_debug(): void;
 }
 /**
 */
@@ -681,10 +694,12 @@ export interface InitOutput {
   readonly velloencoding_append: (a: number, b: number) => void;
   readonly velloencoding_append_with_transform: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
   readonly velloencoding_reset: (a: number, b: number) => void;
+  readonly velloencoding_is_empty: (a: number) => number;
   readonly velloencoding_linewidth: (a: number, b: number) => void;
   readonly velloencoding_matrix: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
-  readonly velloencoding_svg_path: (a: number, b: number, c: number, d: number) => void;
-  readonly velloencoding_json_path: (a: number, b: number, c: number, d: number, e: number) => void;
+  readonly velloencoding_svg_path: (a: number, b: number, c: number, d: number, e: number) => number;
+  readonly velloencoding_insert_path_marker: (a: number) => void;
+  readonly velloencoding_json_path: (a: number, b: number, c: number, d: number, e: number) => number;
   readonly velloencoding_color: (a: number, b: number) => void;
   readonly velloencoding_linear_gradient: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
   readonly velloencoding_radial_gradient: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;
@@ -693,6 +708,7 @@ export interface InitOutput {
   readonly velloencoding_image: (a: number, b: number, c: number) => void;
   readonly velloencoding_finalize_scene: (a: number) => void;
   readonly velloencoding_render: (a: number, b: number, c: number, d: number) => number;
+  readonly velloencoding_print_debug: (a: number) => void;
   readonly run: () => void;
   readonly __wbg_set_velloworkgroupsize_x: (a: number, b: number) => void;
   readonly __wbg_set_velloworkgroupsize_y: (a: number, b: number) => void;

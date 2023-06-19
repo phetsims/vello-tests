@@ -995,6 +995,13 @@ export class VelloEncoding {
         wasm.velloencoding_reset(this.__wbg_ptr, is_fragment);
     }
     /**
+    * @returns {boolean}
+    */
+    is_empty() {
+        const ret = wasm.velloencoding_is_empty(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
     * @param {number} linewidth
     */
     linewidth(linewidth) {
@@ -1013,22 +1020,32 @@ export class VelloEncoding {
     }
     /**
     * @param {boolean} is_fill
+    * @param {boolean} insert_path_marker
     * @param {string} path
+    * @returns {boolean}
     */
-    svg_path(is_fill, path) {
+    svg_path(is_fill, insert_path_marker, path) {
         const ptr0 = passStringToWasm0(path, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        wasm.velloencoding_svg_path(this.__wbg_ptr, is_fill, ptr0, len0);
+        const ret = wasm.velloencoding_svg_path(this.__wbg_ptr, is_fill, insert_path_marker, ptr0, len0);
+        return ret !== 0;
+    }
+    /**
+    */
+    insert_path_marker() {
+        wasm.velloencoding_insert_path_marker(this.__wbg_ptr);
     }
     /**
     * @param {boolean} is_fill
     * @param {boolean} insert_path_marker
     * @param {string} json
+    * @returns {boolean}
     */
     json_path(is_fill, insert_path_marker, json) {
         const ptr0 = passStringToWasm0(json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        wasm.velloencoding_json_path(this.__wbg_ptr, is_fill, insert_path_marker, ptr0, len0);
+        const ret = wasm.velloencoding_json_path(this.__wbg_ptr, is_fill, insert_path_marker, ptr0, len0);
+        return ret !== 0;
     }
     /**
     * @param {number} rgba
@@ -1052,17 +1069,17 @@ export class VelloEncoding {
     /**
     * @param {number} x0
     * @param {number} y0
+    * @param {number} r0
     * @param {number} x1
     * @param {number} y1
-    * @param {number} r0
     * @param {number} r1
     * @param {number} alpha
     * @param {number} extend
     * @param {Float32Array} offsets
     * @param {Uint32Array} colors
     */
-    radial_gradient(x0, y0, x1, y1, r0, r1, alpha, extend, offsets, colors) {
-        wasm.velloencoding_radial_gradient(this.__wbg_ptr, x0, y0, x1, y1, r0, r1, alpha, extend, addHeapObject(offsets), addHeapObject(colors));
+    radial_gradient(x0, y0, r0, x1, y1, r1, alpha, extend, offsets, colors) {
+        wasm.velloencoding_radial_gradient(this.__wbg_ptr, x0, y0, r0, x1, y1, r1, alpha, extend, addHeapObject(offsets), addHeapObject(colors));
     }
     /**
     * @param {number} mix
@@ -1099,6 +1116,11 @@ export class VelloEncoding {
     render(width, height, base_color) {
         const ret = wasm.velloencoding_render(this.__wbg_ptr, width, height, base_color);
         return RenderInfo.__wrap(ret);
+    }
+    /**
+    */
+    print_debug() {
+        wasm.velloencoding_print_debug(this.__wbg_ptr);
     }
 }
 /**
@@ -1663,6 +1685,13 @@ function __wbg_get_imports() {
     imports.wbg = {};
     imports.wbg.__wbindgen_object_drop_ref = function(arg0) {
         takeObject(arg0);
+    };
+    imports.wbg.__wbindgen_string_new = function(arg0, arg1) {
+        const ret = getStringFromWasm0(arg0, arg1);
+        return addHeapObject(ret);
+    };
+    imports.wbg.__wbg_log_1d3ae0273d8f4f8a = function(arg0) {
+        console.log(getObject(arg0));
     };
     imports.wbg.__wbg_buffer_085ec1f694018c4f = function(arg0) {
         const ret = getObject(arg0).buffer;
