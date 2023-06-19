@@ -200,6 +200,7 @@ export class ByteBuffer {
   // NOTE: this MAY truncate
   resize( byteLength = 0 ) {
     byteLength = byteLength || this._arrayBuffer.byteLength * 2;
+    byteLength = Math.ceil( byteLength / 4 ) * 4; // Round up to nearest 4 (for alignment)
     // Double the size of the _arrayBuffer by default, copying memory
     const newArrayBuffer = new ArrayBuffer( byteLength );
     const newU8Array = new Uint8Array( newArrayBuffer );
@@ -497,7 +498,7 @@ export class SceneBufferSizes {
     this.buffer_size = 0;
     this.path_tag_padded = 0;
 
-    let n_path_tags = encoding.path_tags.length + encoding.n_open_clips;
+    let n_path_tags = encoding.pathTagsBuf.byteLength + encoding.n_open_clips;
 
     /// Padded length of the path tag stream in bytes.
     this.path_tag_padded = align_up( n_path_tags, 4 * PATH_REDUCE_WG );
@@ -756,7 +757,7 @@ export default class Encoding {
     // TODO: Typed arrays probably more efficient, do that once working.
 
     /// The path tag stream.
-    this.path_tags = []; // Vec<PathTag> e.g. u8 in rust, number[] in js
+    this.pathTagsBuf = new ByteBuffer(); // path_tags
     /// The path data stream.
     this.pathDataBuf = new ByteBuffer(); // path_data
     /// The draw tag stream.
@@ -794,13 +795,13 @@ export default class Encoding {
   static PATH_NONEMPTY_SUBPATH = 0x3;
 
   is_empty() {
-    return this.path_tags.length === 0;
+    return this.pathTagsBuf.byteLength === 0;
   }
 
   /// Clears the encoding.
   reset( is_fragment ) {
     this.transforms.length = 0;
-    this.path_tags.length = 0;
+    this.pathTagsBuf.clear();
     this.pathDataBuf.clear();
     this.linewidths.length = 0;
     this.drawDataBuf.clear();
@@ -821,7 +822,7 @@ export default class Encoding {
   append( other, transform = null ) {
     const initial_draw_data_length = this.drawDataBuf.byteLength;
 
-    this.path_tags.push( ...other.path_tags );
+    this.pathTagsBuf.pushByteBuffer( other.pathTagsBuf );
     this.pathDataBuf.pushByteBuffer( other.pathDataBuf );
     this.draw_tags.push( ...other.draw_tags );
     this.drawDataBuf.pushByteBuffer( other.drawDataBuf );
@@ -846,7 +847,7 @@ export default class Encoding {
   /// Encodes a linewidth.
   encode_linewidth( linewidth ) {
     if ( this.linewidths[ this.linewidths.length - 1 ] !== linewidth ) {
-      this.path_tags.push( PathTag.LINEWIDTH );
+      this.pathTagsBuf.pushU8( PathTag.LINEWIDTH );
       this.linewidths.push( linewidth );
     }
   }
@@ -858,7 +859,7 @@ export default class Encoding {
   encode_transform( transform ) {
     const last = this.transforms[ this.transforms.length - 1 ];
     if ( !last || !last.equals( transform ) ) {
-      this.path_tags.push( PathTag.TRANSFORM );
+      this.pathTagsBuf.pushU8( PathTag.TRANSFORM );
       this.transforms.push( transform );
       return true;
     }
@@ -888,9 +889,7 @@ export default class Encoding {
     if ( this.state === Encoding.PATH_MOVE_TO ) {
       this.pathDataBuf.byteLength -= 8;
     } else if ( this.state === Encoding.PATH_NONEMPTY_SUBPATH ) {
-      if ( this.path_tags.length ) {
-        this.path_tags[ this.path_tags.length - 1 ] = PathTag.with_subpath_end( this.path_tags[ this.path_tags.length - 1 ] );
-      }
+      this.setSubpathEndTag();
     }
     this.pathDataBuf.pushF32( x );
     this.pathDataBuf.pushF32( y );
@@ -910,7 +909,7 @@ export default class Encoding {
     }
     this.pathDataBuf.pushF32( x );
     this.pathDataBuf.pushF32( y );
-    this.path_tags.push( PathTag.LINE_TO_F32 );
+    this.pathTagsBuf.pushU8( PathTag.LINE_TO_F32 );
     this.state = Encoding.PATH_NONEMPTY_SUBPATH;
     this.n_encoded_segments += 1;
   }
@@ -928,7 +927,7 @@ export default class Encoding {
     this.pathDataBuf.pushF32( y1 );
     this.pathDataBuf.pushF32( x2 );
     this.pathDataBuf.pushF32( y2 );
-    this.path_tags.push( PathTag.QUAD_TO_F32 );
+    this.pathTagsBuf.pushU8( PathTag.QUAD_TO_F32 );
     this.state = Encoding.PATH_NONEMPTY_SUBPATH;
     this.n_encoded_segments += 1;
   }
@@ -948,7 +947,7 @@ export default class Encoding {
     this.pathDataBuf.pushF32( y2 );
     this.pathDataBuf.pushF32( x3 );
     this.pathDataBuf.pushF32( y3 );
-    this.path_tags.push( PathTag.CUBIC_TO_F32 );
+    this.pathTagsBuf.pushU8( PathTag.CUBIC_TO_F32 );
     this.state = Encoding.PATH_NONEMPTY_SUBPATH;
     this.n_encoded_segments += 1;
   }
@@ -973,10 +972,10 @@ export default class Encoding {
     if ( Math.abs( lastX - this.first_point.x ) > 1e-8 || Math.abs( lastY - this.first_point.y ) > 1e-8 ) {
       this.pathDataBuf.pushF32( this.first_point.x );
       this.pathDataBuf.pushF32( this.first_point.y );
-      this.path_tags.push( PathTag.with_subpath_end( PathTag.LINE_TO_F32 ) );
+      this.pathTagsBuf.pushU8( PathTag.with_subpath_end( PathTag.LINE_TO_F32 ) );
       this.n_encoded_segments += 1;
-    } else if ( this.path_tags.length ) {
-      this.path_tags[ this.path_tags.length - 1 ] = PathTag.with_subpath_end( this.path_tags[ this.path_tags.length - 1 ] );
+    } else {
+      this.setSubpathEndTag();
     }
     this.state = Encoding.PATH_START;
   }
@@ -994,9 +993,7 @@ export default class Encoding {
       this.pathDataBuf.byteLength -= 8;
     }
     if ( this.n_encoded_segments !== 0 ) {
-      if ( this.path_tags.length ) {
-        this.path_tags[ this.path_tags.length - 1 ] = PathTag.with_subpath_end( this.path_tags[ this.path_tags.length - 1 ] );
-      }
+      this.setSubpathEndTag();
       this.n_path_segments += this.n_encoded_segments;
       if ( insert_path_marker ) {
         this.insert_path_marker();
@@ -1005,9 +1002,18 @@ export default class Encoding {
     return this.n_encoded_segments;
   }
 
+  setSubpathEndTag() {
+    if ( this.pathTagsBuf.byteLength ) {
+      // In-place replace, add the "subpath end" flag
+      const lastIndex = this.pathTagsBuf.byteLength - 1;
+
+      this.pathTagsBuf.fullU8Array[ lastIndex ] = PathTag.with_subpath_end( this.pathTagsBuf.fullU8Array[ lastIndex ] );
+    }
+  }
+
   // Exposed for glyph handling
   insert_path_marker() {
-    this.path_tags.push( PathTag.PATH );
+    this.pathTagsBuf.pushU8( PathTag.PATH );
     this.n_paths += 1;
   }
 
@@ -1192,7 +1198,7 @@ export default class Encoding {
     if ( this.n_open_clips > 0 ) {
       this.draw_tags.push( DrawTag.END_CLIP );
       // This is a dummy path, and will go away with the new clip impl.
-      this.path_tags.push( PathTag.PATH );
+      this.pathTagsBuf.pushU8( PathTag.PATH );
       this.n_paths += 1;
       this.n_clips += 1;
       this.n_open_clips -= 1;
@@ -1209,7 +1215,7 @@ export default class Encoding {
   }
 
   print_debug() {
-    console.log( `path_tags\n${this.path_tags.map( x => x.toString() ).join( ', ' )}` );
+    console.log( `path_tags\n${this.pathTagsBuf.u8Array.map( x => x.toString() ).join( ', ' )}` );
     console.log( `path_data\n${this.pathDataBuf.u8Array.map( x => x.toString() ).join( ', ' )}` );
     console.log( `draw_tags\n${this.draw_tags.map( x => x.toString() ).join( ', ' )}` );
     console.log( `draw_data\n${this.drawDataBuf.u8Array.map( x => x.toString() ).join( ', ' )}` );
@@ -1281,7 +1287,7 @@ export default class Encoding {
 
     // Path tag stream
     layout.path_tag_base = size_to_words( data.length );
-    data.push( ...this.path_tags );
+    data.push( ...this.pathTagsBuf.u8Array );
     // TODO: what if we... just error if there are open clips? Why are we padding the streams to make this work?
     for ( let i = 0; i < this.n_open_clips; i++ ) {
       data.push( PathTag.PATH );
