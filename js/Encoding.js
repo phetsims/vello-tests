@@ -1,4 +1,217 @@
 
+const TILE_WIDTH = 16; // u32
+const TILE_HEIGHT = 16; // u32
+const PATH_REDUCE_WG = 256; // u32
+const PATH_BBOX_WG = 256; // u32
+const PATH_COARSE_WG = 256; // u32
+const CLIP_REDUCE_WG = 256; // u32
+
+const LAYOUT_BYTES = 10 * 4; // 10x u32
+const CONFIG_UNIFORM_BYTES = 9 * 4 + LAYOUT_BYTES; // 9x u32 + Layout
+const PATH_MONOID_BYTES = 5 * 4; // 5x u32
+const PATH_BBOX_BYTES = 6 * 4; // 4x i32, f32, u32
+const CUBIC_BYTES = 12 * 4; // 10x f32, 2x u32
+const DRAW_MONOID_BYTES = 4 * 4; // 4x u32
+const CLIP_BYTES = 2 * 4; // 2x u32
+const CLIP_ELEMENT_BYTES = 4 + 12 + 4 * 4; // u32 + 12x u8 + 4x f32
+const CLIP_BIC_BYTES = 2 * 4; // 2x u32
+const CLIP_BBOX_BYTES = 4 * 4; // 4x f32
+const DRAW_BBOX_BYTES = 4 * 4; // 4x f32
+const BUMP_ALLOCATORS_BYTES = 6 * 4; // 6x u32
+const BIN_HEADER_BYTES = 2 * 4; // 2x u32
+const PATH_BYTES = 4 * 4 + 4 + 3 * 4; // 4x f32 + u32 + 3x u32
+const TILE_BYTES = 2 * 4; // i32, u32
+const PATH_SEGMENT_BYTES = 6 * 4; // 5x f32, u32
+
+const size_to_words = byte_size => byte_size / 4;
+
+const align_up = (len, alignment) => {
+  return len + ( ( ( ~len ) + 1 ) & ( alignment - 1 ) );
+}
+
+const next_multiple_of = ( val, rhs ) => {
+  const r = val % rhs;
+  return r === 0 ? val : val + ( rhs - r );
+}
+
+const scratch_to_bytes = new Uint8Array( 4 );
+const f32_to_bytes = float => {
+  const view = new DataView( scratch_to_bytes.buffer );
+  view.setFloat32( 0, float );
+  return [ ...scratch_to_bytes ].reverse();
+};
+window.f32_to_bytes = f32_to_bytes;
+
+const u32_to_bytes = int => {
+  const view = new DataView( scratch_to_bytes.buffer );
+  view.setUint32( 0, int );
+  return [ ...scratch_to_bytes ].reverse();
+};
+window.u32_to_bytes = u32_to_bytes;
+
+const with_alpha_factor = ( color, alpha ) => {
+  return ( color & 0xffffff00 ) | ( Math.round( ( color & 0xff ) * alpha ) & 0xff );
+}
+
+const to_premul_u32 = rgba8color => {
+  const a = ( rgba8color & 0xff ) / 255;
+  const r = Math.round( ( ( rgba8color >>> 24 ) & 0xff ) * a >>> 0 );
+  const g = Math.round( ( ( rgba8color >>> 16 ) & 0xff ) * a >>> 0 );
+  const b = Math.round( ( ( rgba8color >>> 8 ) & 0xff ) * a >>> 0 );
+  return ( ( r << 24 ) | ( g << 16 ) | ( b << 8 ) | ( rgba8color & 0xff ) ) >>> 0;
+}
+
+const lerp_rgba8 = ( c1, c2, t ) => {
+  const l = ( x, y, a ) => Math.round( x * ( 1 - a ) + y * a >>> 0 );
+  const r = l( ( c1 >>> 24 ) & 0xff, ( c2 >>> 24 ) & 0xff, t );
+  const g = l( ( c1 >>> 16 ) & 0xff, ( c2 >>> 16 ) & 0xff, t );
+  const b = l( ( c1 >>> 8 ) & 0xff, ( c2 >>> 8 ) & 0xff, t );
+  const a = l( c1 & 0xff, c2 & 0xff, t );
+  return ( ( r << 24 ) | ( g << 16 ) | ( b << 8 ) | a ) >>> 0;
+}
+
+// TODO: optimize minimizing this. It and u32_to_bytes is our performance killer omg
+const make_ramp = ( colorStops, numSamples ) => {
+  const buf = new ByteBuffer( numSamples * 4 );
+  let last_u = 0.0;
+  let last_c = colorStops[ 0 ].color;
+  let this_u = last_u;
+  let this_c = last_c;
+  let j = 0;
+  _.range( 0, numSamples ).forEach( i => {
+    let u = i / ( numSamples - 1 );
+    while ( u > this_u ) {
+      last_u = this_u;
+      last_c = this_c;
+      const colorStop = colorStops[ j ];
+      if ( colorStop ) {
+        this_u = colorStop.offset;
+        this_c = colorStop.color;
+        j++;
+      }
+      else {
+        break;
+      }
+    }
+    let du = this_u - last_u;
+    const u32 = to_premul_u32( du < 1e-9 ? this_c : lerp_rgba8( last_c, this_c, ( u - last_u ) / du ) );
+    buf.pushReversedU32( u32 );
+  } );
+  return buf;
+};
+
+export class ByteBuffer {
+  constructor( initialSize = 512 ) {
+    this._byteLength = 0;
+    // TODO: resizable buffers once supported by Firefox, use maxByteLength (no copying!!!)
+    this._arrayBuffer = new ArrayBuffer( initialSize );
+    this._f32Array = new Float32Array( this._arrayBuffer );
+    this._u32Array = new Uint32Array( this._arrayBuffer );
+    this._u8Array = new Uint8Array( this._arrayBuffer );
+  }
+
+  // Direct access, for when performance is helpful
+  get fullU8Array() {
+    return this._u8Array;
+  }
+  get fullU32Array() {
+    return this._u32Array;
+  }
+  get fullF32Array() {
+    return this._f32Array;
+  }
+
+  get u8Array() {
+    return new Uint8Array( this._arrayBuffer, 0, this._byteLength );
+  }
+
+  clear() {
+    this._byteLength = 0;
+    this._u8Array.fill( 0 );
+  }
+
+  pushByteBuffer( byteBuffer ) {
+    this.ensureSpaceFor( byteBuffer._byteLength );
+
+    this._u8Array.set( byteBuffer._u8Array.slice( 0, byteBuffer._byteLength ), this._byteLength );
+    this._byteLength += byteBuffer._byteLength;
+  }
+
+  pushF32( f32 ) {
+    this.ensureSpaceFor( 4 );
+    // If aligned, use the faster _f32Array
+    if ( this._byteLength % 4 === 0 ) {
+      this._f32Array[ this._byteLength / 4 ] = f32;
+    }
+    else {
+      const bytes = f32_to_bytes( f32 );
+      this._u8Array.set( bytes, this._byteLength );
+    }
+    this._byteLength += 4;
+  }
+
+  pushU32( u32 ) {
+    this.ensureSpaceFor( 4 );
+    // If aligned, use the faster _u32Array
+    if ( this._byteLength % 4 === 0 ) {
+      this._u32Array[ this._byteLength / 4 ] = u32;
+    }
+    else {
+      const bytes = u32_to_bytes( u32 );
+      this._u8Array.set( bytes, this._byteLength );
+    }
+    this._byteLength += 4;
+  }
+
+  pushReversedU32( u32 ) {
+    this.ensureSpaceFor( 4 );
+
+    const bytes = u32_to_bytes( u32 ).reverse();
+    this._u8Array.set( bytes, this._byteLength );
+
+    this._byteLength += 4;
+  }
+
+  pushU8( u8 ) {
+    this.ensureSpaceFor( 1 );
+    this._u8Array[ this._byteLength ] = u8;
+    this._byteLength += 1;
+  }
+
+  get byteLength() {
+    return this._byteLength;
+  }
+
+  set byteLength( byteLength ) {
+    // Don't actually expand below
+    if ( byteLength > this._arrayBuffer.byteLength ) {
+      this.resize( byteLength );
+    }
+    this._byteLength = byteLength;
+  }
+
+  ensureSpaceFor( byteLength ) {
+    const requiredByteLength = this._byteLength + byteLength;
+    if ( this._byteLength + byteLength > this._arrayBuffer.byteLength ) {
+      this.resize( Math.max( this._arrayBuffer.byteLength * 2, requiredByteLength ) );
+    }
+  }
+
+  // NOTE: this MAY truncate
+  resize( byteLength = 0 ) {
+    byteLength = byteLength || this._arrayBuffer.byteLength * 2;
+    // Double the size of the _arrayBuffer by default, copying memory
+    const newArrayBuffer = new ArrayBuffer( byteLength );
+    const newU8Array = new Uint8Array( newArrayBuffer );
+    newU8Array.set( this._u8Array.slice( 0, Math.min( this._byteLength, byteLength ) ) );
+    this._arrayBuffer = newArrayBuffer;
+    this._f32Array = new Float32Array( this._arrayBuffer );
+    this._u32Array = new Uint32Array( this._arrayBuffer );
+    this._u8Array = new Uint8Array( this._arrayBuffer );
+  }
+}
+window.ByteBuffer = ByteBuffer;
+
 export class Affine {
   constructor( a00, a10, a01, a11, a02, a12 ) {
     this.a00 = a00;
@@ -149,68 +362,6 @@ export class Compose {
   static PlusLighter = 13;
 }
 
-const f32_to_bytes = float => {
-  const bytes = new Uint8Array( 4 );
-  const view = new DataView( bytes.buffer );
-  view.setFloat32( 0, float );
-  return [ ...bytes.reverse() ];
-};
-
-const u32_to_bytes = int => {
-  const bytes = new Uint8Array( 4 );
-  const view = new DataView( bytes.buffer );
-  view.setUint32( 0, int );
-  return [ ...bytes.reverse() ];
-}
-
-const with_alpha_factor = ( color, alpha ) => {
-  return ( color & 0xffffff00 ) | ( Math.round( ( color & 0xff ) * alpha ) & 0xff );
-}
-
-const to_premul_u32 = rgba8color => {
-  const a = ( rgba8color & 0xff ) / 255;
-  const r = Math.round( ( ( rgba8color >>> 24 ) & 0xff ) * a >>> 0 );
-  const g = Math.round( ( ( rgba8color >>> 16 ) & 0xff ) * a >>> 0 );
-  const b = Math.round( ( ( rgba8color >>> 8 ) & 0xff ) * a >>> 0 );
-  return ( ( r << 24 ) | ( g << 16 ) | ( b << 8 ) | ( rgba8color & 0xff ) ) >>> 0;
-}
-
-const lerp_rgba8 = ( c1, c2, t ) => {
-  const l = ( x, y, a ) => Math.round( x * ( 1 - a ) + y * a >>> 0 );
-  const r = l( ( c1 >>> 24 ) & 0xff, ( c2 >>> 24 ) & 0xff, t );
-  const g = l( ( c1 >>> 16 ) & 0xff, ( c2 >>> 16 ) & 0xff, t );
-  const b = l( ( c1 >>> 8 ) & 0xff, ( c2 >>> 8 ) & 0xff, t );
-  const a = l( c1 & 0xff, c2 & 0xff, t );
-  return ( ( r << 24 ) | ( g << 16 ) | ( b << 8 ) | a ) >>> 0;
-}
-
-// TODO: optimize minimizing this. It and u32_to_bytes is our performance killer omg
-const make_ramp = ( colorStops, numSamples ) => {
-  let last_u = 0.0;
-  let last_c = colorStops[ 0 ].color;
-  let this_u = last_u;
-  let this_c = last_c;
-  let j = 0;
-  return _.flatten( _.range( 0, numSamples ).map( i => {
-    let u = i / ( numSamples - 1 );
-    while ( u > this_u ) {
-      last_u = this_u;
-      last_c = this_c;
-      const colorStop = colorStops[ j ];
-      if ( colorStop ) {
-        this_u = colorStop.offset;
-        this_c = colorStop.color;
-        j++;
-      }
-      else {
-        break;
-      }
-    }
-    let du = this_u - last_u;
-    return u32_to_bytes( to_premul_u32( du < 1e-9 ? this_c : lerp_rgba8( last_c, this_c, ( u - last_u ) / du ) ) ).reverse();
-  } ) );
-};
-
 // u32
 export class DrawTag {
   constructor() {
@@ -341,13 +492,6 @@ export class Layout {
   }
 }
 
-const TILE_WIDTH = 16; // u32
-const TILE_HEIGHT = 16; // u32
-const PATH_REDUCE_WG = 256; // u32
-const PATH_BBOX_WG = 256; // u32
-const PATH_COARSE_WG = 256; // u32
-const CLIP_REDUCE_WG = 256; // u32
-
 export class SceneBufferSizes {
   constructor( encoding ) {
     this.buffer_size = 0;
@@ -360,7 +504,7 @@ export class SceneBufferSizes {
 
     /// Full size of the scene buffer in bytes.
     this.buffer_size = this.path_tag_padded
-      + encoding.path_data.length // u8
+      + encoding.pathDataBuf.byteLength // u8
       + ( encoding.draw_tags.length + encoding.n_open_clips ) * 4 // u32 in rust
       + encoding.draw_data.length // u8
       + encoding.transforms.length * 6 * 4 // 6xf32
@@ -368,17 +512,6 @@ export class SceneBufferSizes {
 
     // NOTE: because of not using the glyphs feature, our patch_sizes are effectively zero
   }
-}
-
-const size_to_words = byte_size => byte_size / 4;
-
-const align_up = (len, alignment) => {
-  return len + ( ( ( ~len ) + 1 ) & ( alignment - 1 ) );
-}
-
-const next_multiple_of = ( val, rhs ) => {
-  const r = val % rhs;
-  return r === 0 ? val : val + ( rhs - r );
 }
 
 /// Uniform render configuration data used by all GPU stages.
@@ -410,30 +543,32 @@ export class ConfigUniform {
   }
 
   to_typed_array() {
-    return new Uint8Array( [
-      ...u32_to_bytes( this.width_in_tiles ),
-      ...u32_to_bytes( this.height_in_tiles ),
-      ...u32_to_bytes( this.target_width ),
-      ...u32_to_bytes( this.target_height ),
-      ...u32_to_bytes( this.base_color ),
+    const buf = new ByteBuffer( CONFIG_UNIFORM_BYTES );
 
-      // Layout
-      ...u32_to_bytes( this.layout.n_draw_objects ),
-      ...u32_to_bytes( this.layout.n_paths ),
-      ...u32_to_bytes( this.layout.n_clips ),
-      ...u32_to_bytes( this.layout.bin_data_start ),
-      ...u32_to_bytes( this.layout.path_tag_base ),
-      ...u32_to_bytes( this.layout.path_data_base ),
-      ...u32_to_bytes( this.layout.draw_tag_base ),
-      ...u32_to_bytes( this.layout.draw_data_base ),
-      ...u32_to_bytes( this.layout.transform_base ),
-      ...u32_to_bytes( this.layout.linewidth_base ),
+    buf.pushU32( this.width_in_tiles );
+    buf.pushU32( this.height_in_tiles );
+    buf.pushU32( this.target_width );
+    buf.pushU32( this.target_height );
+    buf.pushU32( this.base_color );
 
-      ...u32_to_bytes( this.binning_size ),
-      ...u32_to_bytes( this.tiles_size ),
-      ...u32_to_bytes( this.segments_size ),
-      ...u32_to_bytes( this.ptcl_size )
-    ] );
+    // Layout
+    buf.pushU32( this.layout.n_draw_objects );
+    buf.pushU32( this.layout.n_paths );
+    buf.pushU32( this.layout.n_clips );
+    buf.pushU32( this.layout.bin_data_start );
+    buf.pushU32( this.layout.path_tag_base );
+    buf.pushU32( this.layout.path_data_base );
+    buf.pushU32( this.layout.draw_tag_base );
+    buf.pushU32( this.layout.draw_data_base );
+    buf.pushU32( this.layout.transform_base );
+    buf.pushU32( this.layout.linewidth_base );
+
+    buf.pushU32( this.binning_size );
+    buf.pushU32( this.tiles_size );
+    buf.pushU32( this.segments_size );
+    buf.pushU32( this.ptcl_size );
+
+    return buf.u8Array;
   }
 }
 
@@ -514,23 +649,6 @@ export class BufferSize {
     return align_up( this.size_in_bytes(), alignment );
   }
 }
-
-const LAYOUT_BYTES = 10 * 4; // 10x u32
-const CONFIG_UNIFORM_BYTES = 9 * 4 + LAYOUT_BYTES; // 9x u32 + Layout
-const PATH_MONOID_BYTES = 5 * 4; // 5x u32
-const PATH_BBOX_BYTES = 6 * 4; // 4x i32, f32, u32
-const CUBIC_BYTES = 12 * 4; // 10x f32, 2x u32
-const DRAW_MONOID_BYTES = 4 * 4; // 4x u32
-const CLIP_BYTES = 2 * 4; // 2x u32
-const CLIP_ELEMENT_BYTES = 4 + 12 + 4 * 4; // u32 + 12x u8 + 4x f32
-const CLIP_BIC_BYTES = 2 * 4; // 2x u32
-const CLIP_BBOX_BYTES = 4 * 4; // 4x f32
-const DRAW_BBOX_BYTES = 4 * 4; // 4x f32
-const BUMP_ALLOCATORS_BYTES = 6 * 4; // 6x u32
-const BIN_HEADER_BYTES = 2 * 4; // 2x u32
-const PATH_BYTES = 4 * 4 + 4 + 3 * 4; // 4x f32 + u32 + 3x u32
-const TILE_BYTES = 2 * 4; // i32, u32
-const PATH_SEGMENT_BYTES = 6 * 4; // 5x f32, u32
 
 export class BufferSizes {
   // TODO: this is a GREAT place to view documentation, go to each thing!
@@ -640,7 +758,7 @@ export default class Encoding {
     /// The path tag stream.
     this.path_tags = []; // Vec<PathTag> e.g. u8 in rust, number[] in js
     /// The path data stream.
-    this.path_data = []; // Vec<u8> in rust, number[] in js (OF THE BYTES) - use f32_to_bytes for now
+    this.pathDataBuf = new ByteBuffer(); // path_data
     /// The draw tag stream.
     this.draw_tags = []; // Vec<DrawTag> e.g. u32 in rust, number[] in js
     /// The draw data stream.
@@ -683,7 +801,7 @@ export default class Encoding {
   reset( is_fragment ) {
     this.transforms.length = 0;
     this.path_tags.length = 0;
-    this.path_data.length = 0;
+    this.pathDataBuf.clear();
     this.linewidths.length = 0;
     this.draw_data.length = 0;
     this.draw_tags.length = 0;
@@ -704,7 +822,7 @@ export default class Encoding {
     const initial_draw_data_length = this.draw_data.length;
 
     this.path_tags.push( ...other.path_tags );
-    this.path_data.push( ...other.path_data );
+    this.pathDataBuf.pushByteBuffer( other.pathDataBuf );
     this.draw_tags.push( ...other.draw_tags );
     this.draw_data.push( ...other.draw_data );
     this.n_paths += other.n_paths;
@@ -768,13 +886,14 @@ export default class Encoding {
     this.first_point.x = x;
     this.first_point.y = y;
     if ( this.state === Encoding.PATH_MOVE_TO ) {
-      this.path_data.length = this.path_data.length - 8;
+      this.pathDataBuf.byteLength -= 8;
     } else if ( this.state === Encoding.PATH_NONEMPTY_SUBPATH ) {
       if ( this.path_tags.length ) {
         this.path_tags[ this.path_tags.length - 1 ] = PathTag.with_subpath_end( this.path_tags[ this.path_tags.length - 1 ] );
       }
     }
-    this.path_data.push( ...f32_to_bytes( x ), ...f32_to_bytes( y ) );
+    this.pathDataBuf.pushF32( x );
+    this.pathDataBuf.pushF32( y );
     this.state = Encoding.PATH_MOVE_TO;
   }
 
@@ -789,7 +908,8 @@ export default class Encoding {
       }
       this.move_to( this.first_point.x, this.first_point.y );
     }
-    this.path_data.push( ...f32_to_bytes( x ), ...f32_to_bytes( y ) );
+    this.pathDataBuf.pushF32( x );
+    this.pathDataBuf.pushF32( y );
     this.path_tags.push( PathTag.LINE_TO_F32 );
     this.state = Encoding.PATH_NONEMPTY_SUBPATH;
     this.n_encoded_segments += 1;
@@ -804,7 +924,10 @@ export default class Encoding {
       }
       this.move_to( this.first_point.x, this.first_point.y );
     }
-    this.path_data.push( ...f32_to_bytes( x1 ), ...f32_to_bytes( y1 ), ...f32_to_bytes( x2 ), ...f32_to_bytes( y2 ) );
+    this.pathDataBuf.pushF32( x1 );
+    this.pathDataBuf.pushF32( y1 );
+    this.pathDataBuf.pushF32( x2 );
+    this.pathDataBuf.pushF32( y2 );
     this.path_tags.push( PathTag.QUAD_TO_F32 );
     this.state = Encoding.PATH_NONEMPTY_SUBPATH;
     this.n_encoded_segments += 1;
@@ -819,7 +942,12 @@ export default class Encoding {
       }
       this.move_to( this.first_point.x, this.first_point.y );
     }
-    this.path_data.push( ...f32_to_bytes( x1 ), ...f32_to_bytes( y1 ), ...f32_to_bytes( x2 ), ...f32_to_bytes( y2 ), ...f32_to_bytes( x3 ), ...f32_to_bytes( y3 ) );
+    this.pathDataBuf.pushF32( x1 );
+    this.pathDataBuf.pushF32( y1 );
+    this.pathDataBuf.pushF32( x2 );
+    this.pathDataBuf.pushF32( y2 );
+    this.pathDataBuf.pushF32( x3 );
+    this.pathDataBuf.pushF32( y3 );
     this.path_tags.push( PathTag.CUBIC_TO_F32 );
     this.state = Encoding.PATH_NONEMPTY_SUBPATH;
     this.n_encoded_segments += 1;
@@ -831,25 +959,20 @@ export default class Encoding {
       return;
     }
     else if ( this.state === Encoding.PATH_MOVE_TO ) {
-      this.path_data.length = this.path_data.length - 8;
+      this.pathDataBuf.byteLength -= 8;
       this.state = Encoding.PATH_START;
       return;
     }
-    let len = this.path_data.length;
+    const len = this.pathDataBuf.byteLength / 4;
     if ( len < 8 ) {
       // can't happen
       return;
     }
-    let first_bytes = [ ...f32_to_bytes( this.first_point.x ), ...f32_to_bytes( this.first_point.y ) ];
-    if ( first_bytes[ 0 ] !== this.path_data[ len - 8 ] ||
-         first_bytes[ 1 ] !== this.path_data[ len - 7 ] ||
-         first_bytes[ 2 ] !== this.path_data[ len - 6 ] ||
-         first_bytes[ 3 ] !== this.path_data[ len - 5 ] ||
-         first_bytes[ 4 ] !== this.path_data[ len - 4 ] ||
-         first_bytes[ 5 ] !== this.path_data[ len - 3 ] ||
-         first_bytes[ 6 ] !== this.path_data[ len - 2 ] ||
-         first_bytes[ 7 ] !== this.path_data[ len - 1 ] ) {
-      this.path_data.push( ...first_bytes );
+    const lastX = this.pathDataBuf.fullF32Array[ len - 2 ];
+    const lastY = this.pathDataBuf.fullF32Array[ len - 1 ];
+    if ( Math.abs( lastX - this.first_point.x ) > 1e-8 || Math.abs( lastY - this.first_point.y ) > 1e-8 ) {
+      this.pathDataBuf.pushF32( this.first_point.x );
+      this.pathDataBuf.pushF32( this.first_point.y );
       this.path_tags.push( PathTag.with_subpath_end( PathTag.LINE_TO_F32 ) );
       this.n_encoded_segments += 1;
     } else if ( this.path_tags.length ) {
@@ -868,7 +991,7 @@ export default class Encoding {
       this.close();
     }
     if ( this.state === Encoding.PATH_MOVE_TO ) {
-      this.path_data.length = this.path_data.length - 8;
+      this.pathDataBuf.byteLength -= 8;
     }
     if ( this.n_encoded_segments !== 0 ) {
       if ( this.path_tags.length ) {
@@ -1096,7 +1219,7 @@ export default class Encoding {
 
   print_debug() {
     console.log( `path_tags\n${this.path_tags.map( x => x.toString() ).join( ', ' )}` );
-    console.log( `path_data\n${this.path_data.map( x => x.toString() ).join( ', ' )}` );
+    console.log( `path_data\n${this.pathDataBuf.u8Array.map( x => x.toString() ).join( ', ' )}` );
     console.log( `draw_tags\n${this.draw_tags.map( x => x.toString() ).join( ', ' )}` );
     console.log( `draw_data\n${this.draw_data.map( x => x.toString() ).join( ', ' )}` );
     console.log( `transforms\n${this.transforms.map( x => `_ a00:${x.a00} a10:${x.a10} a01:${x.a01} a11:${x.a11} a02:${x.a02} a12:${x.a12}_` ).join( '\n' )}` );
@@ -1123,7 +1246,7 @@ export default class Encoding {
   resolve() {
     const NUM_RAMP_SAMPLES = 512;
     let numRamps = 0;
-    let rampData = [];
+    const rampBuf = new ByteBuffer();
 
     // TODO: image atlas
     const imageWidth = 1024;
@@ -1150,7 +1273,7 @@ export default class Encoding {
 
         // TODO: cache ramps (we burn a lot of data!!!)
         patch.id = numRamps++;
-        rampData.push( ...make_ramp( patch.stops, NUM_RAMP_SAMPLES ) );
+        rampBuf.pushByteBuffer( make_ramp( patch.stops, NUM_RAMP_SAMPLES ) );
       }
     } );
 
@@ -1179,7 +1302,7 @@ export default class Encoding {
 
     // Path data stream
     layout.path_data_base = size_to_words( data.length );
-    data.push( ...this.path_data );
+    data.push( ...this.pathDataBuf.u8Array );
 
     // Draw tag stream
     layout.draw_tag_base = size_to_words( data.length );
@@ -1249,7 +1372,7 @@ export default class Encoding {
       ramps: {
         width: numRamps === 0 ? 0 : NUM_RAMP_SAMPLES,
         height: numRamps,
-        data: new Uint8Array( rampData )
+        data: rampBuf.u8Array
       },
       images: {
         width: imageWidth,
