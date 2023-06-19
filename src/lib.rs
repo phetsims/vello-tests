@@ -651,7 +651,7 @@ impl VelloEncoding {
     }
 
     // TODO: change the parameter order here. it's confusing, and matches nothing
-    pub fn radial_gradient(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, r0: f32, r1: f32, alpha: f32, extend: u8, offsets: js_sys::Float32Array, colors: js_sys::Uint32Array ) {
+    pub fn radial_gradient(&mut self, x0: f32, y0: f32, r0: f32, x1: f32, y1: f32, r1: f32, alpha: f32, extend: u8, offsets: js_sys::Float32Array, colors: js_sys::Uint32Array ) {
         self.encoding.encode_radial_gradient( DrawRadialGradient {
             index: 0,
             p0: [ x0, y0 ],

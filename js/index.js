@@ -60,7 +60,7 @@ wasmInit().then( async wasm => {
   // TODO: check for memory leaks (ZOMG there are memory leaks in WASM)
 
   ( function step() {
-    window.requestAnimationFrame( step, canvas );
+    // window.requestAnimationFrame( step, canvas );
 
     // console.log( memory.buffer.byteLength );
 

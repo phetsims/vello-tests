@@ -50,6 +50,7 @@ export class ImageStub {
     this.width = width;
     this.height = height;
     this.id = id;
+    this.xy = new Point( 0, 0 );
   }
 }
 
@@ -148,12 +149,12 @@ export class Compose {
 
 export class StreamOffsets {
   constructor( args ) {
-    this.path_tags = args.path_tags;
-    this.path_data = args.path_data;
-    this.draw_tags = args.draw_tags;
-    this.draw_data = args.draw_data;
-    this.transforms = args.transforms;
-    this.linewidths = args.linewidths;
+    this.path_tags = args?.path_tags || 0;
+    this.path_data = args?.path_data || 0;
+    this.draw_tags = args?.draw_tags || 0;
+    this.draw_data = args?.draw_data || 0;
+    this.transforms = args?.transforms || 0;
+    this.linewidths = args?.linewidths || 0;
   }
 
   add( other ) {
@@ -170,32 +171,62 @@ const f32_to_bytes = float => {
   const bytes = new Uint8Array( 4 );
   const view = new DataView( bytes.buffer );
   view.setFloat32( 0, float );
-  return bytes.reverse();
+  return [ ...bytes.reverse() ];
 };
 
 const u32_to_bytes = int => {
   const bytes = new Uint8Array( 4 );
   const view = new DataView( bytes.buffer );
   view.setUint32( 0, int );
-  return bytes.reverse();
+  return [ ...bytes.reverse() ];
 }
 
 const with_alpha_factor = ( color, alpha ) => {
   return ( color & 0xffffff00 ) | ( Math.round( ( color & 0xff ) * alpha ) & 0xff );
 }
 
-export class PathSegmentType {
-  static NOT_A_SEGMENT = 0x0;
-
-  /// Line segment.
-  static LINE_TO = 0x1;
-
-  /// Quadratic segment.
-  static QUAD_TO = 0x2;
-
-  /// Cubic segment.
-  static CUBIC_TO = 0x3;
+const to_premul_u32 = rgba8color => {
+  const a = ( rgba8color & 0xff ) / 255;
+  const r = Math.round( ( ( rgba8color >>> 24 ) & 0xff ) * a >>> 0 );
+  const g = Math.round( ( ( rgba8color >>> 16 ) & 0xff ) * a >>> 0 );
+  const b = Math.round( ( ( rgba8color >>> 8 ) & 0xff ) * a >>> 0 );
+  return ( ( r << 24 ) | ( g << 16 ) | ( b << 8 ) | ( rgba8color & 0xff ) ) >>> 0;
 }
+
+const lerp_rgba8 = ( c1, c2, t ) => {
+  const l = ( x, y, a ) => Math.round( x * ( 1 - a ) + y * a >>> 0 );
+  const r = l( ( c1 >>> 24 ) & 0xff, ( c2 >>> 24 ) & 0xff, t );
+  const g = l( ( c1 >>> 16 ) & 0xff, ( c2 >>> 16 ) & 0xff, t );
+  const b = l( ( c1 >>> 8 ) & 0xff, ( c2 >>> 8 ) & 0xff, t );
+  const a = l( c1 & 0xff, c2 & 0xff, t );
+  return ( ( r << 24 ) | ( g << 16 ) | ( b << 8 ) | a ) >>> 0;
+}
+
+const make_ramp = ( colorStops, numSamples ) => {
+  let last_u = 0.0;
+  let last_c = colorStops[ 0 ].color;
+  let this_u = last_u;
+  let this_c = last_c;
+  let j = 0;
+  return _.flatten( _.range( 0, numSamples ).map( i => {
+    let u = i / ( numSamples - 1 );
+    while ( u > this_u ) {
+      last_u = this_u;
+      last_c = this_c;
+      const colorStop = colorStops[ j ];
+      if ( colorStop ) {
+        this_u = colorStop.offset;
+        this_c = colorStop.color;
+        j++;
+      }
+      else {
+        break;
+      }
+    }
+    let du = this_u - last_u;
+    return u32_to_bytes( to_premul_u32( du < 1e-9 ? this_c : lerp_rgba8( last_c, this_c, ( u - last_u ) / du ) ) ).reverse();
+  } ) );
+};
 
 // u32
 export class DrawTag {
@@ -226,7 +257,7 @@ export class DrawTag {
 
   /// Returns the size of the info buffer (in u32s) used by this tag.
   static info_size( drawTag ) {
-    return ( drawTag >> 6 ) & 0xf;
+    return ( ( drawTag >>> 6 ) & 0xf ) >>> 0;
   }
 }
 
@@ -281,7 +312,7 @@ export class PathTag {
 
   /// Returns true if the tag is a segment.
   static is_path_segment( pathTag ) {
-    return PathTag.path_segment_type( pathTag ) !== PathSegmentType.NOT_A_SEGMENT;
+    return PathTag.path_segment_type( pathTag ) !== 0;
   }
 
   /// Returns true if this is a 32-bit floating point segment.
@@ -303,6 +334,82 @@ export class PathTag {
   static path_segment_type( pathTag ) {
     return pathTag & PathTag.SEGMENT_MASK;
   }
+}
+
+export class Layout {
+  constructor( args ) {
+    // all u32
+    this.n_draw_objects = args?.n_draw_objects || 0; /// Number of draw objects.
+    this.n_paths = args?.n_paths || 0; /// Number of paths.
+    this.n_clips = args?.n_clips || 0; /// Number of clips.
+    this.bin_data_start = args?.bin_data_start || 0; /// Start of binning data.
+    this.path_tag_base = args?.path_tag_base || 0; /// Start of path tag stream.
+    this.path_data_base = args?.path_data_base || 0; /// Start of path data stream.
+    this.draw_tag_base = args?.draw_tag_base || 0; /// Start of draw tag stream.
+    this.draw_data_base = args?.draw_data_base || 0; /// Start of draw data stream.
+    this.transform_base = args?.transform_base || 0; /// Start of transform stream.
+    this.linewidth_base = args?.linewidth_base || 0; /// Start of linewidth stream.
+  }
+}
+
+const TILE_WIDTH = 16; // u32
+const TILE_HEIGHT = 16; // u32
+
+// TODO: Obtain these from the vello_shaders crate
+const PATH_REDUCE_WG = 256; // u32
+const PATH_BBOX_WG = 256; // u32
+const PATH_COARSE_WG = 256; // u32
+const CLIP_REDUCE_WG = 256; // u32
+
+export class SceneBufferSizes {
+  constructor( encoding ) {
+    this.buffer_size = 0;
+    this.path_tag_padded = 0;
+
+    let n_path_tags = encoding.path_tags.length + encoding.n_open_clips;
+
+    /// Padded length of the path tag stream in bytes.
+    this.path_tag_padded = align_up( n_path_tags, 4 * PATH_REDUCE_WG );
+
+    /// Full size of the scene buffer in bytes.
+    this.buffer_size = this.path_tag_padded
+      + encoding.path_data.length // u8
+      + ( encoding.draw_tags.length + encoding.n_open_clips ) * 4 // u32 in rust
+      + encoding.draw_data.length // u8
+      + encoding.transforms.length * 6 * 4 // 6xf32
+      + encoding.linewidths.length * 4; // f32
+
+    // NOTE: because of not using glyphs, our patch_sizes are effectively zero
+    /*
+            let n_path_tags =
+            encoding.path_tags.len() + patch_sizes.path_tags + encoding.n_open_clips as usize;
+        let path_tag_padded = align_up(n_path_tags, 4 * crate::config::PATH_REDUCE_WG);
+        let buffer_size = path_tag_padded
+            + slice_size_in_bytes(&encoding.path_data, patch_sizes.path_data)
+            + slice_size_in_bytes(
+                &encoding.draw_tags,
+                patch_sizes.draw_tags + encoding.n_open_clips as usize,
+            )
+            + slice_size_in_bytes(&encoding.draw_data, patch_sizes.draw_data)
+            + slice_size_in_bytes(&encoding.transforms, patch_sizes.transforms)
+            + slice_size_in_bytes(&encoding.linewidths, patch_sizes.linewidths);
+        Self {
+            buffer_size,
+            path_tag_padded,
+        }
+     */
+  }
+}
+
+// TODO: It's the byte-size of the slice + extra
+// const slice_size_in_bytes = <T: Sized>(slice: &[T], extra: usize) -> usize {
+//     (slice.len() + extra) * std::mem::size_of::<T>()
+// }
+
+const size_to_words = byte_size => byte_size / 4;
+
+const align_up = (len, alignment) => {
+  return len + ( ( ( ~len ) + 1 ) & ( alignment - 1 ) );
 }
 
 // TODO: TS
@@ -374,6 +481,8 @@ export default class Encoding {
 
   /// Appends another encoding to this one with an optional transform.
   append( other, transform = null ) {
+    const initial_draw_data_length = this.draw_data.length;
+
     this.path_tags.push( ...other.path_tags );
     this.path_data.push( ...other.path_data );
     this.draw_tags.push( ...other.draw_tags );
@@ -389,6 +498,11 @@ export default class Encoding {
       this.transforms.push( ...other.transforms );
     }
     this.linewidths.push( ...other.linewidths );
+    this.color_stops.push( ...other.color_stops );
+    this.patches.push( ...other.patches.map( patch => ( {
+      ...patch,
+      draw_data_offset: patch.draw_data_offset + initial_draw_data_length
+    } ) ) );
   }
 
   /// Returns a snapshot of the current stream offsets.
@@ -546,7 +660,7 @@ export default class Encoding {
       this.close();
     }
     if ( this.state === Encoding.PATH_MOVE_TO ) {
-      this.path_data.length = this.path_data.len() - 8;
+      this.path_data.length = this.path_data.length - 8;
     }
     if ( this.n_encoded_segments !== 0 ) {
       if ( this.path_tags.length ) {
@@ -564,7 +678,7 @@ export default class Encoding {
   /// Encodes a solid color brush.
   encode_color( color ) {
     this.draw_tags.push( DrawTag.COLOR );
-    this.draw_data.push( ...u32_to_bytes( color ) );
+    this.draw_data.push( ...u32_to_bytes( to_premul_u32( color ) ) );
   }
 
   // zero: => false, one => color, many => true (icky)
@@ -591,7 +705,7 @@ export default class Encoding {
       this.patches.push( {
         type: 'ramp',
         draw_data_offset: offset,
-        stops: _.range( stops_start, stops_end ),
+        stops: color_stops,
         extend: extend
       } );
       return true;
@@ -625,7 +739,7 @@ export default class Encoding {
   /// Encodes a radial gradient brush.
   encode_radial_gradient( x0, y0, r0, x1, y1, r1, color_stops, alpha, extend ) {
     // Match Skia's epsilon for radii comparison
-    const SKIA_EPSILON = 1 / ( 1 << 12 );
+    const SKIA_EPSILON = 1 / ( ( 1 << 12 ) >>> 0 );
     if ( x0 === x1 && y0 === y1 && Math.abs( r0 - r1 ) < SKIA_EPSILON ) {
       this.encode_color( 0 );
     }
@@ -667,7 +781,7 @@ export default class Encoding {
       /// Packed atlas coordinates. (xy) u32
       ...u32_to_bytes( 0 ),
       /// Packed image dimensions. (width_height) u32
-      ...u32_to_bytes( ( image.width << 16 ) | ( image.height & 0xFFFF ) )
+      ...u32_to_bytes( ( ( image.width << 16 ) >>> 0 ) | ( image.height & 0xFFFF ) )
     ] );
   }
 
@@ -676,7 +790,7 @@ export default class Encoding {
     this.draw_tags.push( DrawTag.BEGIN_CLIP );
     this.draw_data.push( ...[
       // u32 combination of mix and compose
-      ...u32_to_bytes( ( mix << 8 ) | compose ),
+      ...u32_to_bytes( ( ( mix << 8 ) >>> 0 ) | compose ),
       ...f32_to_bytes( alpha )
     ] );
     this.n_clips += 1;
@@ -707,7 +821,6 @@ export default class Encoding {
   }
 
   print_debug() {
-    console.log( 'ENCODING' );
     console.log( `path_tags\n${this.path_tags.map( x => x.toString() ).join( ', ' )}` );
     console.log( `path_data\n${this.path_data.map( x => x.toString() ).join( ', ' )}` );
     console.log( `draw_tags\n${this.draw_tags.map( x => x.toString() ).join( ', ' )}` );
@@ -720,4 +833,459 @@ export default class Encoding {
     console.log( `n_clips\n${this.n_clips}` );
     console.log( `n_open_clips\n${this.n_open_clips}` );
   }
+
+  /// Resolves late bound resources and packs an encoding. Returns the packed
+  /// layout and computed ramp data.
+  resolve() {
+    const NUM_RAMP_SAMPLES = 512;
+    let numRamps = 0;
+    let rampData = [];
+
+    // TODO: image atlas
+    const imageWidth = 1024;
+    const imageHeight = 1024;
+    const images = [];
+
+    this.patches.forEach( patch => {
+      if ( patch.type === 'image' ) {
+        // { type: 'image', draw_data_offset: number, image: ImageStub }
+        // TODO: image atlas (we have BinPacker?)
+        const x = 0;
+        const y = 0;
+        // TODO: eeek, don't modify the xy of the stub image, include our own wrapper
+        patch.image.xy.x = x;
+        patch.image.xy.y = y;
+        images.push( {
+          image: patch.image,
+          x: x,
+          y: y
+        } );
+      }
+      else if ( patch.type === 'ramp' ) {
+        // { type: 'ramp', draw_data_offset: number, stops: number[], extend: number }
+
+        // TODO: cache ramps (we burn a lot of data!!!)
+        patch.id = numRamps++;
+        rampData.push( ...make_ramp( patch.stops, NUM_RAMP_SAMPLES ) );
+      }
+    } );
+
+    // TODO: typed array (we'll need to convert it later)
+    const data = [];
+    const layout = new Layout();
+    layout.n_paths = this.n_paths;
+    layout.n_clips = this.n_clips;
+
+    const sceneBufferSizes = new SceneBufferSizes( this );
+    // data.reserve(buffer_size);
+    const buffer_size = sceneBufferSizes.buffer_size;
+    const path_tag_padded = sceneBufferSizes.path_tag_padded;
+
+    // Path tag stream
+    layout.path_tag_base = size_to_words( data.length );
+    data.push( ...this.path_tags );
+    // TODO: what if we... just error if there are open clips? Why are we padding the streams to make this work?
+    for ( let i = 0; i < this.n_open_clips; i++ ) {
+      data.push( PathTag.PATH );
+    }
+    // TODO: probably a more elegant way in the future, especially when typed array
+    while ( data.length < path_tag_padded ) {
+      data.push( 0 );
+    }
+
+    // Path data stream
+    layout.path_data_base = size_to_words( data.length );
+    data.push( ...this.path_data );
+
+    // Draw tag stream
+    layout.draw_tag_base = size_to_words( data.length );
+    // Bin data follows draw info
+    layout.bin_data_start = _.sum( this.draw_tags, DrawTag.info_size );
+    data.push( ...( _.flatten( this.draw_tags.map( u32_to_bytes ) ) ) );
+    for ( let i = 0; i < this.n_open_clips; i++ ) {
+      data.push( ...u32_to_bytes( DrawTag.END_CLIP ) );
+    }
+
+    // Draw data stream
+    layout.draw_data_base = size_to_words( data.length );
+    {
+      // TODO: a bit simpler to just draw all of it in, then do the ramp/image stuff? get it working first
+      let pos = 0;
+      this.patches.forEach( patch => {
+        if ( pos < patch.draw_data_offset ) {
+          data.push( ...this.draw_data.slice( pos, patch.draw_data_offset ) );
+        }
+        pos = patch.draw_data_offset;
+        if ( patch.type === 'ramp' ) {
+          data.push( ...u32_to_bytes( ( ( patch.id << 2 ) >>> 0 ) | patch.extend ) );
+          pos += 4;
+        }
+        else if ( patch.type === 'image' ) {
+          data.push( ...u32_to_bytes( ( patch.image.xy.x << 16 ) >>> 0 | patch.image.xy.y ) );
+          pos += 4;
+          // TODO: assume the image fit (if not, we'll need to do something else)
+        }
+        else {
+          throw new Error( 'unknown patch type' );
+        }
+      } );
+      if ( pos < this.draw_data.length ) {
+        data.push( ...this.draw_data.slice( pos ) );
+      }
+    }
+
+    // Transform stream
+    layout.transform_base = size_to_words( data.length );
+    data.push( ...( _.flatten( this.transforms.map( transform => {
+      return [
+        ...f32_to_bytes( transform.a00 ),
+        ...f32_to_bytes( transform.a10 ),
+        ...f32_to_bytes( transform.a01 ),
+        ...f32_to_bytes( transform.a11 ),
+        ...f32_to_bytes( transform.a02 ),
+        ...f32_to_bytes( transform.a12 )
+      ];
+    } ) ) ) );
+
+    // Linewidth stream
+    layout.linewidth_base = size_to_words( data.length );
+    data.push( ...( _.flatten( this.linewidths.map( f32_to_bytes ) ) ) );
+
+    layout.n_draw_objects = layout.n_paths;
+
+    if ( data.length !== buffer_size ) {
+      throw new Error( 'buffer size mismatch' );
+    }
+
+    return {
+      packed: new Uint8Array( data ),
+      layout: layout,
+
+      // TODO: ramp_cache.ramps(), image_cache.images()
+      ramps: {
+        width: numRamps === 0 ? 0 : NUM_RAMP_SAMPLES,
+        height: numRamps,
+        data: new Uint8Array( rampData )
+      },
+      images: {
+        width: imageWidth,
+        height: imageHeight,
+        images: images
+      }
+    };
+  }
 }
+
+/*
+
+/// Counters for tracking dynamic allocation on the GPU.
+///
+/// This must be kept in sync with the struct in shader/shared/bump.wgsl
+#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
+#[repr(C)]
+pub struct BumpAllocators {
+    pub failed: u32,
+    // Final needed dynamic size of the buffers. If any of these are larger
+    // than the corresponding `_size` element reallocation needs to occur.
+    pub binning: u32,
+    pub ptcl: u32,
+    pub tile: u32,
+    pub segments: u32,
+    pub blend: u32,
+}
+
+/// Uniform render configuration data used by all GPU stages.
+///
+/// This data structure must be kept in sync with the definition in
+/// shaders/shared/config.wgsl.
+#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
+#[repr(C)]
+pub struct ConfigUniform {
+    /// Width of the scene in tiles.
+    pub width_in_tiles: u32,
+    /// Height of the scene in tiles.
+    pub height_in_tiles: u32,
+    /// Width of the target in pixels.
+    pub target_width: u32,
+    /// Height of the target in pixels.
+    pub target_height: u32,
+    /// The base background color applied to the target before any blends.
+    pub base_color: u32,
+    /// Layout of packed scene data.
+    pub layout: Layout,
+    /// Size of binning buffer allocation (in u32s).
+    pub binning_size: u32,
+    /// Size of tile buffer allocation (in Tiles).
+    pub tiles_size: u32,
+    /// Size of segment buffer allocation (in PathSegments).
+    pub segments_size: u32,
+    /// Size of per-tile command list buffer allocation (in u32s).
+    pub ptcl_size: u32,
+}
+
+/// CPU side setup and configuration.
+#[derive(Default)]
+pub struct RenderConfig {
+    /// GPU side configuration.
+    pub gpu: ConfigUniform,
+    /// Workgroup counts for all compute pipelines.
+    pub workgroup_counts: WorkgroupCounts,
+    /// Sizes of all buffer resources.
+    pub buffer_sizes: BufferSizes,
+}
+
+impl RenderConfig {
+    pub fn new(layout: &Layout, width: u32, height: u32, base_color: &peniko::Color) -> Self {
+        let new_width = next_multiple_of(width, TILE_WIDTH);
+        let new_height = next_multiple_of(height, TILE_HEIGHT);
+        let width_in_tiles = new_width / TILE_WIDTH;
+        let height_in_tiles = new_height / TILE_HEIGHT;
+        let n_path_tags = layout.path_tags_size();
+        let workgroup_counts =
+            WorkgroupCounts::new(layout, width_in_tiles, height_in_tiles, n_path_tags);
+        let buffer_sizes = BufferSizes::new(layout, &workgroup_counts, n_path_tags);
+        Self {
+            gpu: ConfigUniform {
+                width_in_tiles,
+                height_in_tiles,
+                target_width: width,
+                target_height: height,
+                base_color: base_color.to_premul_u32(),
+                binning_size: buffer_sizes.bin_data.len() - layout.bin_data_start,
+                tiles_size: buffer_sizes.tiles.len(),
+                segments_size: buffer_sizes.segments.len(),
+                ptcl_size: buffer_sizes.ptcl.len(),
+                layout: *layout,
+            },
+            workgroup_counts,
+            buffer_sizes,
+        }
+    }
+}
+
+/// Type alias for a workgroup size.
+pub type WorkgroupSize = (u32, u32, u32);
+
+/// Computed sizes for all dispatches.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct WorkgroupCounts {
+    pub use_large_path_scan: bool,
+    pub path_reduce: WorkgroupSize,
+    pub path_reduce2: WorkgroupSize,
+    pub path_scan1: WorkgroupSize,
+    pub path_scan: WorkgroupSize,
+    pub bbox_clear: WorkgroupSize,
+    pub path_seg: WorkgroupSize,
+    pub draw_reduce: WorkgroupSize,
+    pub draw_leaf: WorkgroupSize,
+    pub clip_reduce: WorkgroupSize,
+    pub clip_leaf: WorkgroupSize,
+    pub binning: WorkgroupSize,
+    pub tile_alloc: WorkgroupSize,
+    pub path_coarse: WorkgroupSize,
+    pub backdrop: WorkgroupSize,
+    pub coarse: WorkgroupSize,
+    pub fine: WorkgroupSize,
+}
+
+impl WorkgroupCounts {
+    pub fn new(
+        layout: &Layout,
+        width_in_tiles: u32,
+        height_in_tiles: u32,
+        n_path_tags: u32,
+    ) -> Self {
+        let n_paths = layout.n_paths;
+        let n_draw_objects = layout.n_draw_objects;
+        let n_clips = layout.n_clips;
+        let path_tag_padded = align_up(n_path_tags, 4 * PATH_REDUCE_WG);
+        let path_tag_wgs = path_tag_padded / (4 * PATH_REDUCE_WG);
+        let use_large_path_scan = path_tag_wgs > PATH_REDUCE_WG;
+        let reduced_size = if use_large_path_scan {
+            align_up(path_tag_wgs, PATH_REDUCE_WG)
+        } else {
+            path_tag_wgs
+        };
+        let draw_object_wgs = (n_draw_objects + PATH_BBOX_WG - 1) / PATH_BBOX_WG;
+        let path_coarse_wgs = (n_path_tags + PATH_COARSE_WG - 1) / PATH_COARSE_WG;
+        let clip_reduce_wgs = n_clips.saturating_sub(1) / CLIP_REDUCE_WG;
+        let clip_wgs = (n_clips + CLIP_REDUCE_WG - 1) / CLIP_REDUCE_WG;
+        let path_wgs = (n_paths + PATH_BBOX_WG - 1) / PATH_BBOX_WG;
+        let width_in_bins = (width_in_tiles + 15) / 16;
+        let height_in_bins = (height_in_tiles + 15) / 16;
+        Self {
+            use_large_path_scan,
+            path_reduce: (path_tag_wgs, 1, 1),
+            path_reduce2: (PATH_REDUCE_WG, 1, 1),
+            path_scan1: (reduced_size / PATH_REDUCE_WG, 1, 1),
+            path_scan: (path_tag_wgs, 1, 1),
+            bbox_clear: (draw_object_wgs, 1, 1),
+            path_seg: (path_coarse_wgs, 1, 1),
+            draw_reduce: (draw_object_wgs, 1, 1),
+            draw_leaf: (draw_object_wgs, 1, 1),
+            clip_reduce: (clip_reduce_wgs, 1, 1),
+            clip_leaf: (clip_wgs, 1, 1),
+            binning: (draw_object_wgs, 1, 1),
+            tile_alloc: (path_wgs, 1, 1),
+            path_coarse: (path_coarse_wgs, 1, 1),
+            backdrop: (path_wgs, 1, 1),
+            coarse: (width_in_bins, height_in_bins, 1),
+            fine: (width_in_tiles, height_in_tiles, 1),
+        }
+    }
+}
+
+/// Typed buffer size primitive.
+#[derive(Copy, Clone, Eq, Default, Debug)]
+pub struct BufferSize<T: Sized> {
+    len: u32,
+    _phantom: std::marker::PhantomData<T>,
+}
+
+impl<T: Sized> BufferSize<T> {
+    /// Creates a new buffer size from number of elements.
+    pub const fn new(len: u32) -> Self {
+        Self {
+            len,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
+    /// Creates a new buffer size from size in bytes.
+    pub const fn from_size_in_bytes(size: u32) -> Self {
+        Self::new(size / mem::size_of::<T>() as u32)
+    }
+
+    /// Returns the number of elements.
+    #[allow(clippy::len_without_is_empty)]
+    pub const fn len(self) -> u32 {
+        self.len
+    }
+
+    /// Returns the size in bytes.
+    pub const fn size_in_bytes(self) -> u32 {
+        mem::size_of::<T>() as u32 * self.len
+    }
+
+    /// Returns the size in bytes aligned up to the given value.
+    pub const fn aligned_in_bytes(self, alignment: u32) -> u32 {
+        align_up(self.size_in_bytes(), alignment)
+    }
+}
+
+impl<T: Sized> PartialEq for BufferSize<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.len == other.len
+    }
+}
+
+impl<T: Sized> PartialOrd for BufferSize<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.len.partial_cmp(&other.len)
+    }
+}
+
+/// Computed sizes for all buffers.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct BufferSizes {
+    // Known size buffers
+    pub path_reduced: BufferSize<PathMonoid>,
+    pub path_reduced2: BufferSize<PathMonoid>,
+    pub path_reduced_scan: BufferSize<PathMonoid>,
+    pub path_monoids: BufferSize<PathMonoid>,
+    pub path_bboxes: BufferSize<PathBbox>,
+    pub cubics: BufferSize<Cubic>,
+    pub draw_reduced: BufferSize<DrawMonoid>,
+    pub draw_monoids: BufferSize<DrawMonoid>,
+    pub info: BufferSize<u32>,
+    pub clip_inps: BufferSize<Clip>,
+    pub clip_els: BufferSize<ClipElement>,
+    pub clip_bics: BufferSize<ClipBic>,
+    pub clip_bboxes: BufferSize<ClipBbox>,
+    pub draw_bboxes: BufferSize<DrawBbox>,
+    pub bump_alloc: BufferSize<BumpAllocators>,
+    pub bin_headers: BufferSize<BinHeader>,
+    pub paths: BufferSize<Path>,
+    // Bump allocated buffers
+    pub bin_data: BufferSize<u32>,
+    pub tiles: BufferSize<Tile>,
+    pub segments: BufferSize<PathSegment>,
+    pub ptcl: BufferSize<u32>,
+}
+
+impl BufferSizes {
+    pub fn new(layout: &Layout, workgroups: &WorkgroupCounts, n_path_tags: u32) -> Self {
+        let n_paths = layout.n_paths;
+        let n_draw_objects = layout.n_draw_objects;
+        let n_clips = layout.n_clips;
+        let path_tag_wgs = workgroups.path_reduce.0;
+        let reduced_size = if workgroups.use_large_path_scan {
+            align_up(path_tag_wgs, PATH_REDUCE_WG)
+        } else {
+            path_tag_wgs
+        };
+        let path_reduced = BufferSize::new(reduced_size);
+        let path_reduced2 = BufferSize::new(PATH_REDUCE_WG);
+        let path_reduced_scan = BufferSize::new(path_tag_wgs);
+        let path_monoids = BufferSize::new(path_tag_wgs * PATH_REDUCE_WG);
+        let path_bboxes = BufferSize::new(n_paths);
+        let cubics = BufferSize::new(n_path_tags);
+        let draw_object_wgs = workgroups.draw_reduce.0;
+        let draw_reduced = BufferSize::new(draw_object_wgs);
+        let draw_monoids = BufferSize::new(n_draw_objects);
+        let info = BufferSize::new(layout.bin_data_start);
+        let clip_inps = BufferSize::new(n_clips);
+        let clip_els = BufferSize::new(n_clips);
+        let clip_bics = BufferSize::new(n_clips / CLIP_REDUCE_WG);
+        let clip_bboxes = BufferSize::new(n_clips);
+        let draw_bboxes = BufferSize::new(n_paths);
+        let bump_alloc = BufferSize::new(1);
+        let bin_headers = BufferSize::new(draw_object_wgs * 256);
+        let n_paths_aligned = align_up(n_paths, 256);
+        let paths = BufferSize::new(n_paths_aligned);
+
+        // The following buffer sizes have been hand picked to accommodate the vello test scenes as
+        // well as paris-30k. These should instead get derived from the scene layout using
+        // reasonable heuristics.
+        let bin_data = BufferSize::new(1 << 18);
+        let tiles = BufferSize::new(1 << 21);
+        let segments = BufferSize::new(1 << 21);
+        let ptcl = BufferSize::new(1 << 23);
+        Self {
+            path_reduced,
+            path_reduced2,
+            path_reduced_scan,
+            path_monoids,
+            path_bboxes,
+            cubics,
+            draw_reduced,
+            draw_monoids,
+            info,
+            clip_inps,
+            clip_els,
+            clip_bics,
+            clip_bboxes,
+            draw_bboxes,
+            bump_alloc,
+            bin_headers,
+            paths,
+            bin_data,
+            tiles,
+            segments,
+            ptcl,
+        }
+    }
+}
+
+const fn align_up(len: u32, alignment: u32) -> u32 {
+    len + (len.wrapping_neg() & (alignment - 1))
+}
+
+const fn next_multiple_of(val: u32, rhs: u32) -> u32 {
+    match val % rhs {
+        0 => val,
+        r => val + (rhs - r),
+    }
+}
+
+ */
