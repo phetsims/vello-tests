@@ -1,3 +1,4 @@
+import Atlas from './Atlas.js';
 
 const TILE_WIDTH = 16; // u32
 const TILE_HEIGHT = 16; // u32
@@ -263,6 +264,7 @@ export class ColorStop {
 }
 
 export class ImageStub {
+  // TODO: perhaps reorder parameters
   constructor( width, height, buffer ) {
     this.width = width;
     this.height = height;
@@ -270,6 +272,18 @@ export class ImageStub {
     // TODO: don't have this mutate what we pass in as "parameters" to the encoding (allow images to be used with
     // TODO: multiple encodings
     this.xy = new Point( 0, 0 );
+  }
+
+  serialize() {
+    return {
+      width: this.width,
+      height: this.height,
+      buffer: u8ToBase64( new Uint8Array( this.buffer ) )
+    };
+  }
+
+  static deserialize( data ) {
+    return new ImageStub( data.width, data.height, base64ToU8( data.buffer ).buffer );
   }
 }
 
@@ -493,6 +507,25 @@ export class Layout {
     let start = this.path_tag_base * 4;
     let end = this.path_data_base * 4;
     return end - start;
+  }
+
+  serialize() {
+    return {
+      n_draw_objects: this.n_draw_objects,
+      n_paths: this.n_paths,
+      n_clips: this.n_clips,
+      bin_data_start: this.bin_data_start,
+      path_tag_base: this.path_tag_base,
+      path_data_base: this.path_data_base,
+      draw_tag_base: this.draw_tag_base,
+      draw_data_base: this.draw_data_base,
+      transform_base: this.transform_base,
+      linewidth_base: this.linewidth_base
+    };
+  }
+
+  static deserialize( data ) {
+    return new Layout( data );
   }
 }
 
@@ -720,12 +753,6 @@ export class BufferSizes {
 }
 
 export class RenderConfig {
-  // /// GPU side configuration.
-  // pub gpu: ConfigUniform,
-  // /// Workgroup counts for all compute pipelines.
-  // pub workgroup_counts: WorkgroupCounts,
-  // /// Sizes of all buffer resources.
-  // pub buffer_sizes: BufferSizes,
   constructor( layout, width, height, base_color ) {
     let new_width = next_multiple_of( width, TILE_WIDTH );
     let new_height = next_multiple_of( height, TILE_HEIGHT );
@@ -735,8 +762,17 @@ export class RenderConfig {
     let workgroup_counts = new WorkgroupCounts( layout, width_in_tiles, height_in_tiles, n_path_tags );
     let buffer_sizes = new BufferSizes( layout, workgroup_counts, n_path_tags );
 
+    this.width = width;
+    this.height = height;
+    this.base_color = base_color;
+
+    // Workgroup counts for all compute pipelines.
     this.workgroup_counts = workgroup_counts;
+
+    // Sizes of all buffer resources.
     this.buffer_sizes = buffer_sizes;
+
+    // GPU side configuration.
     this.gpu = new ConfigUniform( {
       width_in_tiles,
       height_in_tiles,
@@ -751,6 +787,107 @@ export class RenderConfig {
     } );
 
     this.config_bytes = this.gpu.to_typed_array();
+  }
+
+  serialize() {
+    return {
+      width: this.width,
+      height: this.height,
+      base_color: this.base_color
+    };
+  }
+
+  static deserialize( data, layout ) {
+    return new RenderConfig( layout, data.width, data.height, data.base_color );
+  }
+}
+
+const u8ToBase64 = u8array => {
+  let string = '';
+
+	for ( let i = 0; i < u8array.byteLength; i++) {
+		string += String.fromCharCode( u8array[ i ] );
+	}
+
+	return window.btoa( string );
+}
+
+function base64ToU8( base64 ) {
+  const string = window.atob( base64 );
+
+  var bytes = new Uint8Array( string.length );
+  for ( let i = 0; i < string.length; i++ ) {
+    bytes[ i ] = string.charCodeAt( i );
+  }
+
+  return bytes;
+}
+
+// TODO: renderInfo name?
+export class ResolvedEncoding {
+  constructor( options ) {
+
+    this.packed = options.packed;
+    this.layout = options.layout;
+    this.ramps = options.ramps;
+    this.images = options.images;
+    this.renderConfig = null; // generated with prepareRender
+  }
+
+  // TODO: get serialization properly working? OR STRIP IT OUT
+  serialize() {
+    return {
+      packed: u8ToBase64( this.packed ),
+      layout: this.layout.serialize(),
+      ramps: {
+        width: this.ramps.width,
+        height: this.ramps.height,
+        data: u8ToBase64( this.ramps.data )
+      },
+      images: {
+        width: this.images.width,
+        height: this.images.height,
+        images: this.images.images.map( image => ( {
+          x: image.x,
+          y: image.y,
+          image: image.image.serialize()
+        } ) )
+      },
+      renderConfig: this.renderConfig === null ? null : this.renderConfig.serialize()
+    };
+  }
+
+  prepareRender( width, height, base_color ) {
+    this.renderConfig = new RenderConfig( this.layout, width, height, base_color );
+
+    return this;
+  }
+
+  static deserialize( data ) {
+    const resolvedEncoding = new ResolvedEncoding( {
+      packed: base64ToU8( data.packed ),
+      layout: Layout.deserialize( data.layout ),
+      ramps: {
+        width: data.ramps.width,
+        height: data.ramps.height,
+        data: base64ToU8( data.ramps.data )
+      },
+      images: {
+        width: data.images.width,
+        height: data.images.height,
+        images: data.images.images.map( image => ( {
+          x: image.x,
+          y: image.y,
+          image: ImageStub.deserialize( image.image )
+        } ) )
+      }
+    } );
+
+    if ( data.renderConfig !== null ) {
+      resolvedEncoding.prepareRender( data.renderConfig.width, data.renderConfig.height, data.renderConfig.base_color );
+    }
+
+    return resolvedEncoding;
   }
 }
 
@@ -1020,69 +1157,6 @@ export default class Encoding {
     this.n_paths += 1;
   }
 
-  // To encode a kite shape, we'll need to split arcs/elliptical-arcs into bezier curves
-  // TODO: don't keep Kite things in here, we'd move it to Kite
-  encode_kite_shape( shape, isFill, insertPathMarker, tolerance ) {
-    this.encode_path( isFill );
-
-    shape.subpaths.forEach( subpath => {
-      if ( subpath.isDrawable() ) {
-        const startPoint = subpath.getFirstSegment().start;
-        this.move_to( startPoint.x, startPoint.y );
-
-        subpath.segments.forEach( segment => {
-          if ( segment instanceof phet.kite.Line ) {
-            this.line_to( segment.end.x, segment.end.y );
-          }
-          else if ( segment instanceof phet.kite.Quadratic ) {
-            this.quad_to( segment.control.x, segment.control.y, segment.end.x, segment.end.y );
-          }
-          else if ( segment instanceof phet.kite.Cubic ) {
-            this.cubic_to( segment.control1.x, segment.control1.y, segment.control2.x, segment.control2.y, segment.end.x, segment.end.y );
-          }
-          else {
-            // arc or elliptical arc, split with kurbo's setup (not the most optimal).
-            // See https://raphlinus.github.io/curves/2021/03/11/bezier-fitting.html for better.
-
-            const maxRadius = segment instanceof phet.kite.Arc ? segment.radius : Math.max( segment.radiusX, segment.radiusY );
-            const scaled_err = maxRadius / tolerance;
-            const n_err = Math.max( Math.pow( 1.1163 * scaled_err, 1 / 6 ), 3.999999 );
-            const n = Math.ceil( n_err * Math.abs( segment.getAngleDifference() ) * ( 1.0 / ( 2.0 * Math.PI ) ) );
-
-            // For now, evenly subdivide
-            const segments = n > 1 ? segment.subdivisions( _.range( 1, n ).map( t => t / n ) ) : [ segment ];
-
-            // Create cubics approximations for each segment
-            // TODO: performance optimize?
-            segments.forEach( subSegment => {
-              const start = subSegment.start;
-              const middle = subSegment.positionAt( 0.5 );
-              const end = subSegment.end;
-
-              // 1/4 start, 1/4 end, 1/2 control, find the control point given the middle (t=0.5) point
-              // average + 2 * ( middle - average ) => 2 * middle - average => 2 * middle - ( start + end ) / 2
-
-              // const average = start.average( end );
-              // const control = average.plus( middle.minus( average ).timesScalar( 2 ) );
-
-              // mutates middle also
-              const control = start.plus( end ).multiplyScalar( -0.5 ).add( middle.multiplyScalar( 2 ) );
-
-              this.quad_to( control.x, control.y, end.x, end.y );
-            } );
-          }
-        } );
-
-        if ( subpath.closed ) {
-          this.close();
-        }
-      }
-    } );
-
-    this.finish( insertPathMarker );
-  };
-
-
   /// Encodes a solid color brush.
   encode_color( color ) {
     this.drawTagsBuf.pushU32( DrawTag.COLOR );
@@ -1230,15 +1304,9 @@ export default class Encoding {
     console.log( `n_open_clips\n${this.n_open_clips}` );
   }
 
+  // Shortcut method
   prepareRender( width, height, base_color ) {
-    const resolved = this.resolve();
-
-    const renderConfig = new RenderConfig( resolved.layout, width, height, base_color );
-
-    return {
-      ...resolved,
-      renderConfig
-    }
+    return this.resolve().prepareRender( width, height, base_color );
   }
 
   /// Resolves late bound resources and packs an encoding. Returns the packed
@@ -1249,23 +1317,24 @@ export default class Encoding {
     const rampBuf = new ByteBuffer();
 
     // TODO: image atlas
+    // TODO: something nice like https://github.com/nical/guillotiere?
     const imageWidth = 1024;
     const imageHeight = 1024;
     const images = [];
 
+    const atlas = new Atlas();
     this.patches.forEach( patch => {
       if ( patch.type === 'image' ) {
-        // { type: 'image', draw_data_offset: number, image: ImageStub }
-        // TODO: image atlas (we have BinPacker?)
-        const x = 0;
-        const y = 0;
+        const pos = atlas.addImage( patch.image );
+
         // TODO: eeek, don't modify the xy of the stub image, include our own wrapper
-        patch.image.xy.x = x;
-        patch.image.xy.y = y;
+        // TODO: can we avoid this
+        patch.image.xy.x = pos.x;
+        patch.image.xy.y = pos.y;
         images.push( {
           image: patch.image,
-          x: x,
-          y: y
+          x: pos.x,
+          y: pos.y
         } );
       }
       else if ( patch.type === 'ramp' ) {
@@ -1360,7 +1429,7 @@ export default class Encoding {
       throw new Error( 'buffer size mismatch' );
     }
 
-    return {
+    return new ResolvedEncoding( {
       packed: dataBuf.u8Array,
       layout: layout,
 
@@ -1374,6 +1443,6 @@ export default class Encoding {
         height: imageHeight,
         images: images
       }
-    };
+    } );
   }
 }

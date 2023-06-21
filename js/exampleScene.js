@@ -2,13 +2,17 @@ import getTextEncoding from './getTextEncoding.js';
 import SceneFrame from './SceneFrame.js';
 import { default as Encoding, Affine, Extend, ColorStop, ImageStub, Mix, Compose } from './Encoding.js';
 // import WASMEncoding from './WASMEncoding.js';
+import PhetEncoding from './PhetEncoding.js';
+import examplePhetScene from './examplePhetScene.js';
 
 let demoImage;
+
+let examplePhetSceneEncoding = null;
 
 const exampleScene = ( scale ) => {
 
   // const EncodingType = true ? Encoding : WASMEncoding;
-  const EncodingType = Encoding;
+  const EncodingType = PhetEncoding;
 
   // Wait for WASM to be ready
   if ( !demoImage ) {
@@ -111,90 +115,105 @@ const exampleScene = ( scale ) => {
     console.log( `gpu.ptcl_size: ${renderConfig.gpu.ptcl_size}` );
   };
 
-  const angle = Date.now() / 1000;
-  let c = Math.cos( angle );
-  let s = Math.sin( angle );
-
-  encoding.encode_transform( new Affine( c, -s, s, c, 200, 100 ) );
-  encoding.encode_linewidth( -1 );
-  encoding.encode_path( true );
-  encoding.move_to( -100, -100 );
-  encoding.quad_to( 0, 0, 100, -100 );
-  encoding.line_to( 100, 100 );
-  encoding.cubic_to( 0, 200, 0, 0, -100, 100 );
-  encoding.line_to( -100, -100 );
-  encoding.close();
-  encoding.finish( true );
-  encoding.encode_linear_gradient( -100, 0, 100, 0, [
-    new ColorStop( 0, 0xff0000ff ),
-    new ColorStop( 1, 0x0000ffff )
-  ], Extend.Pad );
-
-
-  encoding.encode_transform( new Affine( c, -s, s, c, 150, 200 ) );
-  encoding.encode_linewidth( -1 );
-  encoding.encode_path( true );
-  encoding.move_to( 0, 0 );
-  encoding.line_to( 128, 0 );
-  encoding.quad_to( 256, 0, 256, 128 );
-  encoding.line_to( 256, 256 );
-  encoding.line_to( 128, 256 );
-  encoding.quad_to( 0, 256, 0, 128 );
-  encoding.line_to( 0, 0 );
-  encoding.close();
-  encoding.finish( true );
-  encoding.encode_image( demoImage );
-
-  encoding.encode_transform( new Affine( c, -s, s, c, 200, 400 ) );
-  encoding.encode_linewidth( -1 );
-  encoding.encode_path( true );
-  encoding.move_to( -100, -100 );
-  encoding.line_to( 100, -100 );
-  encoding.line_to( 0, 100 );
-  encoding.line_to( -100, 100 );
-  encoding.line_to( -100, -100 );
-  encoding.close();
-  encoding.finish( true );
-  encoding.encode_radial_gradient( 0, 0, 20, 0, 0, 120, [
-    new ColorStop( 0, 0x0000ffff ),
-    new ColorStop( 1, 0x00ff00ff )
-  ], Extend.Pad );
-
-  // For a layer push: matrix, linewidth(-1), shape, begin_clip
-  encoding.encode_transform( new Affine( 1, 0, 0, 1, 0, 0 ) );
-  encoding.encode_linewidth( -1 );
-  encoding.encode_path( true );
-  encoding.move_to( 0, 0 );
-  encoding.line_to( 512, 0 );
-  encoding.line_to( 256, 256 );
-  encoding.line_to( 0, 512 );
-  encoding.close();
-  encoding.finish( true );
-  encoding.encode_begin_clip( Mix.Normal, Compose.SrcOver, 0.5 );
-
-  encoding.encode_transform( new Affine( 3, 0, 0, 3, 50, 150 ) );
-  encoding.encode_linewidth( -1 );
-  // TODO: inspect tolerance function and see if our subdivisions are good
-  encoding.encode_kite_shape( new phet.kite.Shape( 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' ), true, true, 0.00001 );
-  encoding.encode_color( 0xff00ff66 );
-
-  encoding.encode_transform( new Affine( 3, 0, 0, 3, 50, 150 ) );
-  encoding.encode_linewidth( 1 );
-  encoding.encode_kite_shape( new phet.kite.Shape( 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' ), false, true, 0.00001 );
-  encoding.encode_color( 0x000000ff );
-
-  encoding.encode_end_clip();
-
-  const textScale = 40 + 10 * Math.sin( Date.now() / 1000 );
-  const textEncoding = getTextEncoding( 'How is this text? No hints!', shaping.Direction.LTR );
-  if ( !textEncoding.is_empty() ) {
-    encoding.append( textEncoding, new Affine( textScale, 0, 0, textScale, 5, 400 ) );
-    encoding.encode_color( 0x330000ff );
+  if ( !examplePhetSceneEncoding ) {
+    examplePhetSceneEncoding = new PhetEncoding();
+    examplePhetScene( examplePhetSceneEncoding );
   }
 
+  // const angle = Date.now() / 1000;
+  // let c = Math.cos( angle );
+  // let s = Math.sin( angle );
+  //
+  // encoding.encode_transform( new Affine( c, -s, s, c, 200, 100 ) );
+  // encoding.encode_linewidth( -1 );
+  // encoding.encode_path( true );
+  // encoding.move_to( -100, -100 );
+  // encoding.quad_to( 0, 0, 100, -100 );
+  // encoding.line_to( 100, 100 );
+  // encoding.cubic_to( 0, 200, 0, 0, -100, 100 );
+  // encoding.line_to( -100, -100 );
+  // encoding.close();
+  // encoding.finish( true );
+  // encoding.encode_linear_gradient( -100, 0, 100, 0, [
+  //   new ColorStop( 0, 0xff0000ff ),
+  //   new ColorStop( 1, 0x0000ffff )
+  // ], Extend.Pad );
+  //
+  //
+  // encoding.encode_transform( new Affine( c, -s, s, c, 150, 200 ) );
+  // encoding.encode_linewidth( -1 );
+  // encoding.encode_path( true );
+  // encoding.move_to( 0, 0 );
+  // encoding.line_to( 128, 0 );
+  // encoding.quad_to( 256, 0, 256, 128 );
+  // encoding.line_to( 256, 256 );
+  // encoding.line_to( 128, 256 );
+  // encoding.quad_to( 0, 256, 0, 128 );
+  // encoding.line_to( 0, 0 );
+  // encoding.close();
+  // encoding.finish( true );
+  // encoding.encode_image( demoImage );
+  //
+  // encoding.encode_transform( new Affine( c, -s, s, c, 200, 400 ) );
+  // encoding.encode_linewidth( -1 );
+  // encoding.encode_path( true );
+  // encoding.move_to( -100, -100 );
+  // encoding.line_to( 100, -100 );
+  // encoding.line_to( 0, 100 );
+  // encoding.line_to( -100, 100 );
+  // encoding.line_to( -100, -100 );
+  // encoding.close();
+  // encoding.finish( true );
+  // encoding.encode_radial_gradient( 0, 0, 20, 0, 0, 120, [
+  //   new ColorStop( 0, 0x0000ffff ),
+  //   new ColorStop( 1, 0x00ff00ff )
+  // ], Extend.Pad );
+  //
+  // // For a layer push: matrix, linewidth(-1), shape, begin_clip
+  // encoding.encode_transform( new Affine( 1, 0, 0, 1, 0, 0 ) );
+  // encoding.encode_linewidth( -1 );
+  // encoding.encode_path( true );
+  // encoding.move_to( 0, 0 );
+  // encoding.line_to( 512, 0 );
+  // encoding.line_to( 256, 256 );
+  // encoding.line_to( 0, 512 );
+  // encoding.close();
+  // encoding.finish( true );
+  // encoding.encode_begin_clip( Mix.Normal, Compose.SrcOver, 0.5 );
+  //
+  // encoding.encode_transform( new Affine( 3, 0, 0, 3, 50, 150 ) );
+  // encoding.encode_linewidth( -1 );
+  // // TODO: inspect tolerance function and see if our subdivisions are good
+  // encoding.encode_kite_shape( new phet.kite.Shape( 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' ), true, true, 0.00001 );
+  // encoding.encode_color( 0xff00ff66 );
+  //
+  // encoding.encode_transform( new Affine( 3, 0, 0, 3, 50, 150 ) );
+  // encoding.encode_linewidth( 1 );
+  // encoding.encode_kite_shape( new phet.kite.Shape( 'M 100 50 L 30 50 A 30 30 0 0 1 0 20 L 0 0 L 90 0 A 10 10 0 0 1 100 10 L 100 50 Z ' ), false, true, 0.00001 );
+  // encoding.encode_color( 0x000000ff );
+  //
+  // encoding.encode_end_clip();
+  //
+  // const textScale = 40 + 10 * Math.sin( Date.now() / 1000 );
+  // const textEncoding = getTextEncoding( 'How is this text? No hints!', shaping.Direction.LTR );
+  // if ( !textEncoding.is_empty() ) {
+  //   encoding.append( textEncoding, new Affine( textScale, 0, 0, textScale, 5, 400 ) );
+  //   encoding.encode_color( 0x330000ff );
+  // }
+
+
   const testIntermediateEncoding = new EncodingType();
-  testIntermediateEncoding.append( encoding );
-  testIntermediateEncoding.append( encoding, new Affine( 0.4, 0, 0, 0.4, Math.floor( 512 * ( 1 - 0.4 ) ) + 20, 0 ) );
+  testIntermediateEncoding.append( examplePhetSceneEncoding );
+  const time = Date.now() / 1000;
+  const mag = 30;
+  testIntermediateEncoding.append( examplePhetSceneEncoding, new Affine(
+    0.4, 0, 0, 0.4,
+    50 + Math.cos( time ) * mag, 450 + Math.sin( time ) * mag
+  ) );
+  testIntermediateEncoding.append( examplePhetSceneEncoding, new Affine(
+    3.5, 0, 0, 3.5,
+    200 + Math.cos( time ) * mag - 120, 450 + Math.sin( time ) * mag - 40
+  ) );
 
   sceneEncoding.append( testIntermediateEncoding, new Affine( scale, 0, 0, scale, 0, 0 ) );
 

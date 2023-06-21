@@ -1,4 +1,5 @@
 import { default as Encoding, Affine } from './Encoding.js';
+import PhetEncoding from './PhetEncoding.js';
 
 // user permissions request is likely a non-starter
 // const fonts = await window.queryLocalFonts();
@@ -28,7 +29,7 @@ const getGlyphEncoding = ( font, index ) => {
   if ( glyphEncodingMap[ font ][ index ] === undefined ) {
     const glyph = shaping.getGlyph( font, index );
 
-    const encoding = new Encoding();
+    const encoding = new PhetEncoding();
 
     // TODO: tolerance?
     encoding.encode_kite_shape( glyph, true, false, 0.01 );
