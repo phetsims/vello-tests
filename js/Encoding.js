@@ -69,36 +69,6 @@ export const lerp_rgba8 = ( c1, c2, t ) => {
   return ( ( r << 24 ) | ( g << 16 ) | ( b << 8 ) | a ) >>> 0;
 };
 
-// TODO: optimize minimizing this. It and u32_to_bytes is our performance killer omg
-const make_ramp = ( colorStops, numSamples ) => {
-  const buf = new ByteBuffer( numSamples * 4 );
-  let last_u = 0.0;
-  let last_c = colorStops[ 0 ].color;
-  let this_u = last_u;
-  let this_c = last_c;
-  let j = 0;
-  _.range( 0, numSamples ).forEach( i => {
-    let u = i / ( numSamples - 1 );
-    while ( u > this_u ) {
-      last_u = this_u;
-      last_c = this_c;
-      const colorStop = colorStops[ j ];
-      if ( colorStop ) {
-        this_u = colorStop.offset;
-        this_c = colorStop.color;
-        j++;
-      }
-      else {
-        break;
-      }
-    }
-    let du = this_u - last_u;
-    const u32 = to_premul_u32( du < 1e-9 ? this_c : lerp_rgba8( last_c, this_c, ( u - last_u ) / du ) );
-    buf.pushReversedU32( u32 );
-  } );
-  return buf;
-};
-
 export class ByteBuffer {
   constructor( initialSize = 512 ) {
     this._byteLength = 0;

@@ -57,6 +57,7 @@ export default class DeviceContext {
     } );
   }
 
+  // @private
   updateRampTexture() {
     this.device.queue.writeTexture( {
       texture: this.rampTexture
