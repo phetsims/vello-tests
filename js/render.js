@@ -1,11 +1,7 @@
 import BufferPool from "./BufferPool.js";
 import Shader from './Shader.js';
-import { ResolvedEncoding } from './Encoding.js';
 
-const render = ( sceneFrame, device, outTexture ) => {
-  const width = outTexture.width;
-  const height = outTexture.height;
-
+const render = ( renderInfo, device, outTexture ) => {
   const shaders = Shader.getShaders( device );
 
   const preferredFormat = outTexture.format;
@@ -13,18 +9,7 @@ const render = ( sceneFrame, device, outTexture ) => {
     throw new Error( 'unsupported format' );
   }
 
-  // const sceneData = JSON.parse( '{"packed":"IEAKCQoJCgkKDRAgCgkKCQkNECAJCQ0QQAkJDRAgQAoJCgkJDRAgCQkNEEAJCQ0QIEAKCQoJCgkKDRAgQAoJCgkJDRAgCQkNEEAJCQ0QIEAKCQoJCQ0QIAkJDRBACQkNECBACgkKCQoJCg0QIEAKCQoJCgkKDRAgQAoJCgkKCQoNEEAKCQoJCgkKDRAgQA0QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEB/iEMAAAAAWciKQwCd2z5A/4pDAACgQED/ikMWVwBDWciKQ0jpBENAf4hDFlcFQwAAoEAWVwVDAJ3bPkjpBEMAAAAAFlcAQwAAAAAAAKBAAJ3bPgCd2z4AAKBAAAAAAEB/iEMAAAAAAAAAAAAAwECaxAM/msQDPwAAwEAAAAAAAJDVQQAAAADuuABCmsQDPwDIAkIAAMBAAMgCQgAAjEEAAAAAAACMQQAAAAAAAMBAAMgCQQAAAAAAyIJBAADAQAAAAAAAAMBAAMgCQQAAAAAAyAJBAAAAAADIgkEAAMBAAAAAAAAAwEAAyAJBAAAAAADIAkIAANhB7rgAQu7wAUIAkNVBAAAEQgAAwEAAAARCmsQDP+7wAUIAAAAAAADYQQAAAAAAAIRBAMgCQgAAhEEAyAJCAADYQQDIAkEAAMBAAAAAAAAAAAAAyIJBAAAAAADIAkEAAMBAAMgCQQAAwEAAAAAAAAAAAADIgkEAAAAAAMgCQQAAwEAAkNVBAAAAAO64AEKaxAM/AMgCQgAAwEAAyAJCAADYQe64AELu8AFCAJDVQQAABEIAAMBAAAAEQprEAz/u8AFCAAAAAAAA2EEAAAAAAADAQJrEAz+axAM/AADAQAAAAAAAkNVBAAAAAAAAAAAAAMBAmsQDP5rEAz8AAMBAAAAAAACQ1UEAAAAA7rgAQprEAz8AyAJCAADAQADIAkIAAIxBAAAAAAAAjEEAAAAAAADAQADIAkEAAAAAAMiCQQAAwEAAAAAAAADAQADIAkEAAAAAAMgCQQAAAAAAyIJBAADAQAAAAAAAAMBAAMgCQQAAAAAAyAJCAADYQe64AELu8AFCAJDVQQAABEIAAMBAAAAEQprEAz/u8AFCAAAAAAAA2EEAAAAAAACEQQDIAkIAAIRBAMgCQgAA2EEAyAJBAADAQAAAAAAAAAAAAMiCQQAAAAAAyAJBAADAQADIAkEAAMBAAAAAAAAAAAAAyIJBAAAAAADIAkEAAMBAAJDVQQAAAADuuABCmsQDPwDIAkIAAMBAAMgCQgAA2EHuuABC7vABQgCQ1UEAAARCAADAQAAABEKaxAM/7vABQgAAAAAAANhBAAAAAAAAwECaxAM/msQDPwAAwEAAAAAAAJDVQQAAAABAf4hDAAAAAFnIikMAnds+QP+KQwAAoEBA/4pDFlcAQ1nIikNI6QRDQH+IQxZXBUMAAKBAFlcFQwCd2z5I6QRDAAAAABZXAEMAAAAAAACgQACd2z4Ands+AACgQAAAAABAf4hDAAAAAAAAnEEAAIxBnqCaQZ6gmkEAAIxBAACcQQAAAEAAAJxBzbAvPp6gmkEAAAAAAACMQQAAAAAAAABAzbAvPs2wLz4AAABAAAAAAAAAjEEAAAAAnqCaQc2wLz4AAJxBAAAAQAAAnEEAAIxBAACcQQAAjEGeoJpBnqCaQQAAjEEAAJxBAAAAQAAAnEHNsC8+nqCaQQAAAAAAAIxBAAAAAAAAAEDNsC8+zbAvPgAAAEAAAAAAAACMQQAAAACeoJpBzbAvPgAAnEEAAABAAACcQQAAjEEAAMDAAAAAAAAAwEAAAAAARAAAAEQAAABEAAAARAAAAEQAAABEAAAARAAAAEQAAABEAAAARAAAAEQAAABEAAAARAAAAEQAAABEAAAARAAAAEQAAABEAAAARAAAAP////////////1HAP8AAAD///////1HAP8AAAD/gICA//////8ALbX/AAAA//////8ALbX/AAAA/4CAgP8DAwP/AFX//wAAAP////8AAIA/AAAAAAAAAAAAAIA/AAAAPwAAAD8AAMA/AAAAAAAAAAAAAMA/gCKLQi2uaUIAAMA/AAAAAAAAAAAAAMA/AKijQi3uMkIAAMA/AAAAAAAAAAAAAMA/gCKLQi2uaUIAAMA/AAAAAAAAAAAAAMA/AKijQhY34UIAAMA/AAAAAAAAAAAAAMA/gCKLQi2uaUIAAMA/AAAAAAAAAAAAAMA/QGIgQy2uaUIAAMA/AAAAAAAAAAAAAMA/AKUsQy3uMkIAAMA/AAAAAAAAAAAAAMA/QGIgQy2uaUIAAMA/AAAAAAAAAAAAAMA/AKUsQxY34UIAAMA/AAAAAAAAAAAAAMA/QGIgQy2uaUIAAIA/AAAAAAAAAAAAAIA/AAAAPwAAAD8AAIA/AAAAAAAAAAAAAIA/AAAsQQAADEEAAIA/AAAAAAAAAAAAAIA/AACkQQAAlEEAAIC/AACAPgAAgL8AAIA+AAAAPwAAgL8AAIA+AACAvwAAgD4AAAA/AACAPwAAgL8AAAA/AABAQA==","layout":{"n_draw_objects":19,"n_paths":19,"n_clips":0,"bin_data_start":19,"path_tag_base":0,"path_data_base":256,"draw_tag_base":552,"draw_data_base":571,"transform_base":590,"linewidth_base":674},"ramps":{"width":0,"height":0,"data":""},"images":{"width":1024,"height":1024,"images":[]},"renderConfig":null}' );
-  // const renderInfo = ResolvedEncoding.deserialize( sceneData );
-  // renderInfo.prepareRender( width, height, 0x666666ff );
-
-  const renderInfo = sceneFrame.sceneEncoding.prepareRender( width, height, 0xf4fcfeff );
-  // const renderInfo = sceneFrame.sceneEncoding.prepareRender( width, height, 0x666666ff );
-  // renderInfo = ResolvedEncoding.deserialize( renderInfo.serialize() ); // serialization test
-
-  // TODO: don't hard-code base_color
-  // TODO: rename
   const renderConfig = renderInfo.renderConfig;
-
   const sceneBytes = renderInfo.packed;
 
   const ramps = renderInfo.ramps.data;
@@ -32,8 +17,7 @@ const render = ( sceneFrame, device, outTexture ) => {
   const rampsHeight = renderInfo.ramps.height;
   const hasRamps = rampsHeight > 0;
 
-  // TODO: hook up images
-  const images = renderInfo.images.images; // TODO
+  const images = renderInfo.images.images;
   const imagesWidth = renderInfo.images.width;
   const imagesHeight = renderInfo.images.height;
   const hasImages = images.length > 0;
@@ -69,8 +53,7 @@ const render = ( sceneFrame, device, outTexture ) => {
     configBuffer, sceneBuffer, reducedBuffer
   ] );
 
-  // TODO: rename?
-  let pathtag_parent = reducedBuffer;
+  let pathTagParentBuffer = reducedBuffer;
 
   let reduced2Buffer;
   let reducedScanBuffer;
@@ -87,13 +70,13 @@ const render = ( sceneFrame, device, outTexture ) => {
       reducedBuffer, reduced2Buffer, reducedScanBuffer
     ] );
 
-    pathtag_parent = reducedScanBuffer;
+    pathTagParentBuffer = reducedScanBuffer;
   }
 
   const tagmonoidBuffer = bufferPool.getBuffer( bufferSizes.path_monoids.size_in_bytes(), 'tagmonoid buffer' );
 
   ( workgroupCounts.use_large_path_scan ? shaders.pathtag_scan_large : shaders.pathtag_scan_small ).dispatch( encoder, workgroupCounts.path_scan, [
-    configBuffer, sceneBuffer, pathtag_parent, tagmonoidBuffer
+    configBuffer, sceneBuffer, pathTagParentBuffer, tagmonoidBuffer
   ] );
 
   bufferPool.freeBuffer( reducedBuffer );
@@ -203,15 +186,8 @@ const render = ( sceneFrame, device, outTexture ) => {
   bufferPool.freeBuffer( pathBuffer );
   bufferPool.freeBuffer( bumpBuffer );
 
-  // let out_image = ImageProxy::new(params.width, params.height, ImageFormat::Rgba8);
-  //
-  // // NOTE: not apparently using robust for wasm?
-      // Note: in the wasm case, we're currently not running the robust
-      // pipeline, as it requires more async wiring for the readback.
-  // if robust {
-  //     recording.download(*bump_buf.as_buf().unwrap());
-  // }
 
+  // NOTE: This is relevant code for if we want to render to a different texture (how to create it)
   // const outImage = device.createTexture( {
   //   label: 'outImage',
   //   size: {
@@ -281,7 +257,6 @@ const render = ( sceneFrame, device, outTexture ) => {
     dimension: '2d'
   } );
 
-  // TODO TODO: images
   if ( hasImages ) {
     for ( let i = 0; i < images.length; i++ ) {
       const imageInfo = images[ i ];

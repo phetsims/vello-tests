@@ -26,7 +26,7 @@ const PATH_SEGMENT_BYTES = 6 * 4; // 5x f32, u32
 
 const size_to_words = byte_size => byte_size / 4;
 
-const align_up = (len, alignment) => {
+const align_up = ( len, alignment ) => {
   return len + ( ( ( ~len ) + 1 ) & ( alignment - 1 ) );
 }
 
@@ -35,13 +35,13 @@ const next_multiple_of = ( val, rhs ) => {
   return r === 0 ? val : val + ( rhs - r );
 }
 
+// Convert u32/f32 to 4 bytes in little endian order
 const scratch_to_bytes = new Uint8Array( 4 );
 const f32_to_bytes = float => {
   const view = new DataView( scratch_to_bytes.buffer );
   view.setFloat32( 0, float );
   return [ ...scratch_to_bytes ].reverse();
 };
-
 const u32_to_bytes = int => {
   const view = new DataView( scratch_to_bytes.buffer );
   view.setUint32( 0, int );
@@ -284,6 +284,14 @@ export class ImageStub {
 
   static deserialize( data ) {
     return new ImageStub( data.width, data.height, base64ToU8( data.buffer ).buffer );
+  }
+}
+
+export class AtlasSubImage {
+  constructor( image, x, y ) {
+    this.image = image;
+    this.x = x;
+    this.y = y;
   }
 }
 
@@ -823,8 +831,7 @@ function base64ToU8( base64 ) {
   return bytes;
 }
 
-// TODO: renderInfo name?
-export class ResolvedEncoding {
+export class RenderInfo {
   constructor( options ) {
 
     this.packed = options.packed;
@@ -864,7 +871,7 @@ export class ResolvedEncoding {
   }
 
   static deserialize( data ) {
-    const resolvedEncoding = new ResolvedEncoding( {
+    const renderInfo = new RenderInfo( {
       packed: base64ToU8( data.packed ),
       layout: Layout.deserialize( data.layout ),
       ramps: {
@@ -884,18 +891,16 @@ export class ResolvedEncoding {
     } );
 
     if ( data.renderConfig !== null ) {
-      resolvedEncoding.prepareRender( data.renderConfig.width, data.renderConfig.height, data.renderConfig.base_color );
+      renderInfo.prepareRender( data.renderConfig.width, data.renderConfig.height, data.renderConfig.base_color );
     }
 
-    return resolvedEncoding;
+    return renderInfo;
   }
 }
 
 // TODO: TS
 export default class Encoding {
   constructor() {
-    // TODO: Typed arrays probably more efficient, do that once working.
-
     /// The path tag stream.
     this.pathTagsBuf = new ByteBuffer(); // path_tags
     /// The path data stream.
@@ -1316,8 +1321,6 @@ export default class Encoding {
     let numRamps = 0;
     const rampBuf = new ByteBuffer();
 
-    // TODO: image atlas
-    // TODO: something nice like https://github.com/nical/guillotiere?
     const imageWidth = 1024;
     const imageHeight = 1024;
     const images = [];
@@ -1327,15 +1330,10 @@ export default class Encoding {
       if ( patch.type === 'image' ) {
         const pos = atlas.addImage( patch.image );
 
-        // TODO: eeek, don't modify the xy of the stub image, include our own wrapper
-        // TODO: can we avoid this
-        patch.image.xy.x = pos.x;
-        patch.image.xy.y = pos.y;
-        images.push( {
-          image: patch.image,
-          x: pos.x,
-          y: pos.y
-        } );
+        const atlasSubImage = new AtlasSubImage( patch.image, pos.x, pos.y );
+        patch.atlasSubImage = atlasSubImage
+
+        images.push( atlasSubImage );
       }
       else if ( patch.type === 'ramp' ) {
         // { type: 'ramp', draw_data_offset: number, stops: number[], extend: number }
@@ -1393,7 +1391,7 @@ export default class Encoding {
           bytes = u32_to_bytes( ( ( patch.id << 2 ) >>> 0 ) | patch.extend );
         }
         else if ( patch.type === 'image' ) {
-          bytes = u32_to_bytes( ( patch.image.xy.x << 16 ) >>> 0 | patch.image.xy.y );
+          bytes = u32_to_bytes( ( patch.atlasSubImage.x << 16 ) >>> 0 | patch.atlasSubImage.y );
           // TODO: assume the image fit (if not, we'll need to do something else)
         }
         else {
@@ -1429,7 +1427,7 @@ export default class Encoding {
       throw new Error( 'buffer size mismatch' );
     }
 
-    return new ResolvedEncoding( {
+    return new RenderInfo( {
       packed: dataBuf.u8Array,
       layout: layout,
 

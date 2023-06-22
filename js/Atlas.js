@@ -1,6 +1,7 @@
 
 export default class Atlas {
 
+  // TODO: better image atlas, something nice like https://github.com/nical/guillotiere?
   constructor() {
     // TODO: actual implementation!!!
 
