@@ -1,5 +1,4 @@
 import getTextEncoding from './getTextEncoding.js';
-import SceneFrame from './SceneFrame.js';
 import { default as Encoding, Affine, Extend, ColorStop, ImageStub, Mix, Compose } from './Encoding.js';
 // import WASMEncoding from './WASMEncoding.js';
 import PhetEncoding from './PhetEncoding.js';
@@ -219,7 +218,7 @@ const exampleScene = ( scale ) => {
 
   sceneEncoding.finalize_scene();
 
-  return new SceneFrame( sceneEncoding, _.noop )
+  return sceneEncoding;
 };
 
 export default exampleScene;

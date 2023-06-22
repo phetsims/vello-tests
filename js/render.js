@@ -1,7 +1,9 @@
-import BufferPool from "./BufferPool.js";
+import BufferPool from './BufferPool.js';
 import Shader from './Shader.js';
 
-const render = ( renderInfo, device, outTexture ) => {
+const render = ( renderInfo, deviceContext, outTexture ) => {
+  const device = deviceContext.device;
+
   const shaders = Shader.getShaders( device );
 
   const preferredFormat = outTexture.format;
@@ -228,7 +230,7 @@ const render = ( renderInfo, device, outTexture ) => {
     const block_size = 4;
     device.queue.writeTexture( {
       texture: gradientImage
-    }, ramps.buffer, {
+    }, ramps, {
       offset: 0,
       bytesPerRow: rampsWidth * block_size
     }, {
@@ -304,6 +306,7 @@ const render = ( renderInfo, device, outTexture ) => {
 
   const commandBuffer = encoder.finish();
   device.queue.submit( [ commandBuffer ] );
+  // device.queue.onSubmittedWorkDone().then( () => {} );
 
   // for now TODO: can we reuse? Likely get some from reusing these
   configBuffer.destroy();

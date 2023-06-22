@@ -37,37 +37,37 @@ const next_multiple_of = ( val, rhs ) => {
 
 // Convert u32/f32 to 4 bytes in little endian order
 const scratch_to_bytes = new Uint8Array( 4 );
-const f32_to_bytes = float => {
+export const f32_to_bytes = float => {
   const view = new DataView( scratch_to_bytes.buffer );
   view.setFloat32( 0, float );
   return [ ...scratch_to_bytes ].reverse();
 };
-const u32_to_bytes = int => {
+export const u32_to_bytes = int => {
   const view = new DataView( scratch_to_bytes.buffer );
   view.setUint32( 0, int );
   return [ ...scratch_to_bytes ].reverse();
 };
 
-const with_alpha_factor = ( color, alpha ) => {
+export const with_alpha_factor = ( color, alpha ) => {
   return ( color & 0xffffff00 ) | ( Math.round( ( color & 0xff ) * alpha ) & 0xff );
-}
+};
 
-const to_premul_u32 = rgba8color => {
+export const to_premul_u32 = rgba8color => {
   const a = ( rgba8color & 0xff ) / 255;
   const r = Math.round( ( ( rgba8color >>> 24 ) & 0xff ) * a >>> 0 );
   const g = Math.round( ( ( rgba8color >>> 16 ) & 0xff ) * a >>> 0 );
   const b = Math.round( ( ( rgba8color >>> 8 ) & 0xff ) * a >>> 0 );
   return ( ( r << 24 ) | ( g << 16 ) | ( b << 8 ) | ( rgba8color & 0xff ) ) >>> 0;
-}
+};
 
-const lerp_rgba8 = ( c1, c2, t ) => {
+export const lerp_rgba8 = ( c1, c2, t ) => {
   const l = ( x, y, a ) => Math.round( x * ( 1 - a ) + y * a >>> 0 );
   const r = l( ( c1 >>> 24 ) & 0xff, ( c2 >>> 24 ) & 0xff, t );
   const g = l( ( c1 >>> 16 ) & 0xff, ( c2 >>> 16 ) & 0xff, t );
   const b = l( ( c1 >>> 8 ) & 0xff, ( c2 >>> 8 ) & 0xff, t );
   const a = l( c1 & 0xff, c2 & 0xff, t );
   return ( ( r << 24 ) | ( g << 16 ) | ( b << 8 ) | a ) >>> 0;
-}
+};
 
 // TODO: optimize minimizing this. It and u32_to_bytes is our performance killer omg
 const make_ramp = ( colorStops, numSamples ) => {
@@ -866,8 +866,6 @@ export class RenderInfo {
 
   prepareRender( width, height, base_color ) {
     this.renderConfig = new RenderConfig( this.layout, width, height, base_color );
-
-    return this;
   }
 
   static deserialize( data ) {
@@ -1310,22 +1308,25 @@ export default class Encoding {
   }
 
   // Shortcut method
-  prepareRender( width, height, base_color ) {
-    return this.resolve().prepareRender( width, height, base_color );
+  prepareRender( deviceContext, width, height, base_color ) {
+    return this.resolve( deviceContext ).prepareRender( width, height, base_color );
   }
 
   /// Resolves late bound resources and packs an encoding. Returns the packed
   /// layout and computed ramp data.
-  resolve() {
-    const NUM_RAMP_SAMPLES = 512;
-    let numRamps = 0;
-    const rampBuf = new ByteBuffer();
+  resolve( deviceContext ) {
 
     const imageWidth = 1024;
     const imageHeight = 1024;
     const images = [];
 
     const atlas = new Atlas();
+
+    const rampPatches = this.patches.filter( patch => patch.type === 'ramp' );
+    deviceContext.allocateRampPatches( rampPatches );
+
+    // deviceContext.allocateRampPatches( this.patches.filter( patch => patch.type === 'image' ) );
+
     this.patches.forEach( patch => {
       if ( patch.type === 'image' ) {
         const pos = atlas.addImage( patch.image );
@@ -1335,15 +1336,7 @@ export default class Encoding {
 
         images.push( atlasSubImage );
       }
-      else if ( patch.type === 'ramp' ) {
-        // { type: 'ramp', draw_data_offset: number, stops: number[], extend: number }
-
-        // TODO: cache ramps (we burn a lot of data!!!)
-        patch.id = numRamps++;
-        rampBuf.pushByteBuffer( make_ramp( patch.stops, NUM_RAMP_SAMPLES ) );
-      }
     } );
-
 
     const layout = new Layout();
     layout.n_paths = this.n_paths;
@@ -1432,9 +1425,9 @@ export default class Encoding {
       layout: layout,
 
       ramps: {
-        width: numRamps === 0 ? 0 : NUM_RAMP_SAMPLES,
-        height: numRamps,
-        data: rampBuf.u8Array
+        width: rampPatches.length ? deviceContext.rampWidth : 0,
+        height: rampPatches.length ? deviceContext.rampHeight : 0,
+        data: deviceContext.rampArrayBuffer
       },
       images: {
         width: imageWidth,
