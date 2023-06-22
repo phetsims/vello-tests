@@ -197,12 +197,12 @@ const render = ( renderInfo, deviceContext, outTexture ) => {
   //   dimension: '2d'
   // } );
 
-  deviceContext.updateRampTexture();
-  deviceContext.updateAtlasTexture();
+  deviceContext.ramps.updateTexture();
+  deviceContext.atlas.updateTexture();
 
   // Have the fine-rasterization shader use the preferred format as output (for now)
   ( preferredFormat === 'bgra8unorm' ? shaders.fine_bgra8unorm : shaders.fine_rgba8unorm ).dispatch( encoder, workgroupCounts.fine, [
-    configBuffer, tileBuffer, segmentsBuffer, outTexture.createView(), ptclBuffer, deviceContext.rampTextureView, infoBinDataBuffer, deviceContext.atlasTextureView
+    configBuffer, tileBuffer, segmentsBuffer, outTexture.createView(), ptclBuffer, deviceContext.ramps.textureView, infoBinDataBuffer, deviceContext.atlas.textureView
   ] );
 
   // NOTE: bgra8unorm vs rgba8unorm can't be copied, so this depends on the platform?

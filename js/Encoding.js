@@ -233,7 +233,7 @@ export class ColorStop {
   }
 }
 
-export class ImageStub {
+export class BufferImage {
   // TODO: perhaps reorder parameters
   constructor( width, height, buffer ) {
     this.width = width;
@@ -250,7 +250,7 @@ export class ImageStub {
   }
 
   static deserialize( data ) {
-    return new ImageStub( data.width, data.height, base64ToU8( data.buffer ).buffer );
+    return new BufferImage( data.width, data.height, base64ToU8( data.buffer ).buffer );
   }
 }
 
@@ -850,7 +850,7 @@ export class RenderInfo {
         images: data.images.images.map( image => ( {
           x: image.x,
           y: image.y,
-          image: ImageStub.deserialize( image.image )
+          image: BufferImage.deserialize( image.image )
         } ) )
       }
     } );
@@ -1212,7 +1212,7 @@ export default class Encoding {
     }
   }
 
-  /// Encodes an image brush.  (( ImageStub)
+  /// Encodes an image brush.  (( BufferImage)
   encode_image( image ) {
     this.patches.push( {
       type: 'image',
@@ -1279,10 +1279,10 @@ export default class Encoding {
   resolve( deviceContext ) {
 
     const rampPatches = this.patches.filter( patch => patch.type === 'ramp' );
-    deviceContext.updateRampPatches( rampPatches );
+    deviceContext.ramps.updatePatches( rampPatches );
 
     const imagePatches = this.patches.filter( patch => patch.type === 'image' );
-    deviceContext.updateImagePatches( imagePatches );
+    deviceContext.atlas.updatePatches( imagePatches );
 
     const layout = new Layout();
     layout.n_paths = this.n_paths;

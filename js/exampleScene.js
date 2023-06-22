@@ -1,8 +1,7 @@
-import getTextEncoding from './getTextEncoding.js';
-import { default as Encoding, Affine, Extend, ColorStop, ImageStub, Mix, Compose } from './Encoding.js';
+import { Affine, BufferImage } from './Encoding.js';
+import examplePhetScene from './examplePhetScene.js';
 // import WASMEncoding from './WASMEncoding.js';
 import PhetEncoding from './PhetEncoding.js';
-import examplePhetScene from './examplePhetScene.js';
 
 let demoImage;
 
@@ -24,7 +23,7 @@ const exampleScene = ( scale ) => {
         demoImageData.set( [ x, y, 0, 255 ], ( x + y * demoImageWidth ) * 4 );
       }
     }
-    demoImage = new ImageStub( demoImageWidth, demoImageHeight, demoImageData.buffer );
+    demoImage = new BufferImage( demoImageWidth, demoImageHeight, demoImageData.buffer );
   }
 
   const sceneEncoding = new EncodingType();
