@@ -1,3 +1,193 @@
+import Atlas from './Atlas.js';
+
+const TILE_WIDTH = 16; // u32
+const TILE_HEIGHT = 16; // u32
+const PATH_REDUCE_WG = 256; // u32
+const PATH_BBOX_WG = 256; // u32
+const PATH_COARSE_WG = 256; // u32
+const CLIP_REDUCE_WG = 256; // u32
+
+const LAYOUT_BYTES = 10 * 4; // 10x u32
+const CONFIG_UNIFORM_BYTES = 9 * 4 + LAYOUT_BYTES; // 9x u32 + Layout
+const PATH_MONOID_BYTES = 5 * 4; // 5x u32
+const PATH_BBOX_BYTES = 6 * 4; // 4x i32, f32, u32
+const CUBIC_BYTES = 12 * 4; // 10x f32, 2x u32
+const DRAW_MONOID_BYTES = 4 * 4; // 4x u32
+const CLIP_BYTES = 2 * 4; // 2x u32
+const CLIP_ELEMENT_BYTES = 4 + 12 + 4 * 4; // u32 + 12x u8 + 4x f32
+const CLIP_BIC_BYTES = 2 * 4; // 2x u32
+const CLIP_BBOX_BYTES = 4 * 4; // 4x f32
+const DRAW_BBOX_BYTES = 4 * 4; // 4x f32
+const BUMP_ALLOCATORS_BYTES = 6 * 4; // 6x u32
+const BIN_HEADER_BYTES = 2 * 4; // 2x u32
+const PATH_BYTES = 4 * 4 + 4 + 3 * 4; // 4x f32 + u32 + 3x u32
+const TILE_BYTES = 2 * 4; // i32, u32
+const PATH_SEGMENT_BYTES = 6 * 4; // 5x f32, u32
+
+const size_to_words = byte_size => byte_size / 4;
+
+const align_up = ( len, alignment ) => {
+  return len + ( ( ( ~len ) + 1 ) & ( alignment - 1 ) );
+}
+
+const next_multiple_of = ( val, rhs ) => {
+  const r = val % rhs;
+  return r === 0 ? val : val + ( rhs - r );
+}
+
+// Convert u32/f32 to 4 bytes in little endian order
+const scratch_to_bytes = new Uint8Array( 4 );
+export const f32_to_bytes = float => {
+  const view = new DataView( scratch_to_bytes.buffer );
+  view.setFloat32( 0, float );
+  return [ ...scratch_to_bytes ].reverse();
+};
+export const u32_to_bytes = int => {
+  const view = new DataView( scratch_to_bytes.buffer );
+  view.setUint32( 0, int );
+  return [ ...scratch_to_bytes ].reverse();
+};
+
+export const with_alpha_factor = ( color, alpha ) => {
+  return ( color & 0xffffff00 ) | ( Math.round( ( color & 0xff ) * alpha ) & 0xff );
+};
+
+export const to_premul_u32 = rgba8color => {
+  const a = ( rgba8color & 0xff ) / 255;
+  const r = Math.round( ( ( rgba8color >>> 24 ) & 0xff ) * a >>> 0 );
+  const g = Math.round( ( ( rgba8color >>> 16 ) & 0xff ) * a >>> 0 );
+  const b = Math.round( ( ( rgba8color >>> 8 ) & 0xff ) * a >>> 0 );
+  return ( ( r << 24 ) | ( g << 16 ) | ( b << 8 ) | ( rgba8color & 0xff ) ) >>> 0;
+};
+
+export const lerp_rgba8 = ( c1, c2, t ) => {
+  const l = ( x, y, a ) => Math.round( x * ( 1 - a ) + y * a >>> 0 );
+  const r = l( ( c1 >>> 24 ) & 0xff, ( c2 >>> 24 ) & 0xff, t );
+  const g = l( ( c1 >>> 16 ) & 0xff, ( c2 >>> 16 ) & 0xff, t );
+  const b = l( ( c1 >>> 8 ) & 0xff, ( c2 >>> 8 ) & 0xff, t );
+  const a = l( c1 & 0xff, c2 & 0xff, t );
+  return ( ( r << 24 ) | ( g << 16 ) | ( b << 8 ) | a ) >>> 0;
+};
+
+export class ByteBuffer {
+  constructor( initialSize = 512 ) {
+    this._byteLength = 0;
+    // TODO: resizable buffers once supported by Firefox, use maxByteLength (no copying!!!)
+    this._arrayBuffer = new ArrayBuffer( initialSize );
+    this._f32Array = new Float32Array( this._arrayBuffer );
+    this._u32Array = new Uint32Array( this._arrayBuffer );
+    this._u8Array = new Uint8Array( this._arrayBuffer );
+  }
+
+  // Direct access, for when performance is helpful
+  get fullU8Array() {
+    return this._u8Array;
+  }
+  get fullU32Array() {
+    return this._u32Array;
+  }
+  get fullF32Array() {
+    return this._f32Array;
+  }
+
+  get u8Array() {
+    return new Uint8Array( this._arrayBuffer, 0, this._byteLength );
+  }
+  get u32Array() {
+    return new Uint32Array( this._arrayBuffer, 0, this._byteLength / 4 );
+  }
+  get f32Array() {
+    return new Float32Array( this._arrayBuffer, 0, this._byteLength / 4 );
+  }
+
+  clear() {
+    this._byteLength = 0;
+    this._u8Array.fill( 0 );
+  }
+
+  pushByteBuffer( byteBuffer ) {
+    // TODO: this is a hot spot, optimize
+    this.ensureSpaceFor( byteBuffer._byteLength );
+
+    this._u8Array.set( byteBuffer._u8Array.slice( 0, byteBuffer._byteLength ), this._byteLength );
+    this._byteLength += byteBuffer._byteLength;
+  }
+
+  pushF32( f32 ) {
+    this.ensureSpaceFor( 4 );
+    // If aligned, use the faster _f32Array
+    if ( this._byteLength % 4 === 0 ) {
+      this._f32Array[ this._byteLength / 4 ] = f32;
+    }
+    else {
+      const bytes = f32_to_bytes( f32 );
+      this._u8Array.set( bytes, this._byteLength );
+    }
+    this._byteLength += 4;
+  }
+
+  pushU32( u32 ) {
+    this.ensureSpaceFor( 4 );
+    // If aligned, use the faster _u32Array
+    if ( this._byteLength % 4 === 0 ) {
+      this._u32Array[ this._byteLength / 4 ] = u32;
+    }
+    else {
+      const bytes = u32_to_bytes( u32 );
+      this._u8Array.set( bytes, this._byteLength );
+    }
+    this._byteLength += 4;
+  }
+
+  pushReversedU32( u32 ) {
+    this.ensureSpaceFor( 4 );
+
+    const bytes = u32_to_bytes( u32 ).reverse();
+    this._u8Array.set( bytes, this._byteLength );
+
+    this._byteLength += 4;
+  }
+
+  pushU8( u8 ) {
+    this.ensureSpaceFor( 1 );
+    this._u8Array[ this._byteLength ] = u8;
+    this._byteLength += 1;
+  }
+
+  get byteLength() {
+    return this._byteLength;
+  }
+
+  set byteLength( byteLength ) {
+    // Don't actually expand below
+    if ( byteLength > this._arrayBuffer.byteLength ) {
+      this.resize( byteLength );
+    }
+    this._byteLength = byteLength;
+  }
+
+  ensureSpaceFor( byteLength ) {
+    const requiredByteLength = this._byteLength + byteLength;
+    if ( this._byteLength + byteLength > this._arrayBuffer.byteLength ) {
+      this.resize( Math.max( this._arrayBuffer.byteLength * 2, requiredByteLength ) );
+    }
+  }
+
+  // NOTE: this MAY truncate
+  resize( byteLength = 0 ) {
+    // TODO: This is a hot-spot!
+    byteLength = byteLength || this._arrayBuffer.byteLength * 2;
+    byteLength = Math.ceil( byteLength / 4 ) * 4; // Round up to nearest 4 (for alignment)
+    // Double the size of the _arrayBuffer by default, copying memory
+    const newArrayBuffer = new ArrayBuffer( byteLength );
+    const newU8Array = new Uint8Array( newArrayBuffer );
+    newU8Array.set( this._u8Array.slice( 0, Math.min( this._byteLength, byteLength ) ) );
+    this._arrayBuffer = newArrayBuffer;
+    this._f32Array = new Float32Array( this._arrayBuffer );
+    this._u32Array = new Uint32Array( this._arrayBuffer );
+    this._u8Array = new Uint8Array( this._arrayBuffer );
+  }
+}
 
 export class Affine {
   constructor( a00, a10, a01, a11, a02, a12 ) {
@@ -10,6 +200,7 @@ export class Affine {
   }
 
   times( affine ) {
+    // TODO: Affine (and this method) are a hot spot IF we are doing client-side matrix stuff
     const a00 = this.a00 * affine.a00 + this.a01 * affine.a10;
     const a01 = this.a00 * affine.a01 + this.a01 * affine.a11;
     const a02 = this.a00 * affine.a02 + this.a01 * affine.a12 + this.a02;
@@ -45,14 +236,24 @@ export class ColorStop {
   }
 }
 
-export class ImageStub {
+export class BufferImage {
+  // TODO: perhaps reorder parameters
   constructor( width, height, buffer ) {
     this.width = width;
     this.height = height;
     this.buffer = buffer;
-    // TODO: don't have this mutate what we pass in as "parameters" to the encoding (allow images to be used with
-    // TODO: multiple encodings
-    this.xy = new Point( 0, 0 );
+  }
+
+  serialize() {
+    return {
+      width: this.width,
+      height: this.height,
+      buffer: u8ToBase64( new Uint8Array( this.buffer ) )
+    };
+  }
+
+  static deserialize( data ) {
+    return new BufferImage( data.width, data.height, base64ToU8( data.buffer ).buffer );
   }
 }
 
@@ -148,68 +349,6 @@ export class Compose {
   /// element and 1 to 0 on the other element.
   static PlusLighter = 13;
 }
-
-const f32_to_bytes = float => {
-  const bytes = new Uint8Array( 4 );
-  const view = new DataView( bytes.buffer );
-  view.setFloat32( 0, float );
-  return [ ...bytes.reverse() ];
-};
-
-const u32_to_bytes = int => {
-  const bytes = new Uint8Array( 4 );
-  const view = new DataView( bytes.buffer );
-  view.setUint32( 0, int );
-  return [ ...bytes.reverse() ];
-}
-
-const with_alpha_factor = ( color, alpha ) => {
-  return ( color & 0xffffff00 ) | ( Math.round( ( color & 0xff ) * alpha ) & 0xff );
-}
-
-const to_premul_u32 = rgba8color => {
-  const a = ( rgba8color & 0xff ) / 255;
-  const r = Math.round( ( ( rgba8color >>> 24 ) & 0xff ) * a >>> 0 );
-  const g = Math.round( ( ( rgba8color >>> 16 ) & 0xff ) * a >>> 0 );
-  const b = Math.round( ( ( rgba8color >>> 8 ) & 0xff ) * a >>> 0 );
-  return ( ( r << 24 ) | ( g << 16 ) | ( b << 8 ) | ( rgba8color & 0xff ) ) >>> 0;
-}
-
-const lerp_rgba8 = ( c1, c2, t ) => {
-  const l = ( x, y, a ) => Math.round( x * ( 1 - a ) + y * a >>> 0 );
-  const r = l( ( c1 >>> 24 ) & 0xff, ( c2 >>> 24 ) & 0xff, t );
-  const g = l( ( c1 >>> 16 ) & 0xff, ( c2 >>> 16 ) & 0xff, t );
-  const b = l( ( c1 >>> 8 ) & 0xff, ( c2 >>> 8 ) & 0xff, t );
-  const a = l( c1 & 0xff, c2 & 0xff, t );
-  return ( ( r << 24 ) | ( g << 16 ) | ( b << 8 ) | a ) >>> 0;
-}
-
-// TODO: optimize minimizing this. It and u32_to_bytes is our performance killer omg
-const make_ramp = ( colorStops, numSamples ) => {
-  let last_u = 0.0;
-  let last_c = colorStops[ 0 ].color;
-  let this_u = last_u;
-  let this_c = last_c;
-  let j = 0;
-  return _.flatten( _.range( 0, numSamples ).map( i => {
-    let u = i / ( numSamples - 1 );
-    while ( u > this_u ) {
-      last_u = this_u;
-      last_c = this_c;
-      const colorStop = colorStops[ j ];
-      if ( colorStop ) {
-        this_u = colorStop.offset;
-        this_c = colorStop.color;
-        j++;
-      }
-      else {
-        break;
-      }
-    }
-    let du = this_u - last_u;
-    return u32_to_bytes( to_premul_u32( du < 1e-9 ? this_c : lerp_rgba8( last_c, this_c, ( u - last_u ) / du ) ) ).reverse();
-  } ) );
-};
 
 // u32
 export class DrawTag {
@@ -339,46 +478,47 @@ export class Layout {
     let end = this.path_data_base * 4;
     return end - start;
   }
-}
 
-const TILE_WIDTH = 16; // u32
-const TILE_HEIGHT = 16; // u32
-const PATH_REDUCE_WG = 256; // u32
-const PATH_BBOX_WG = 256; // u32
-const PATH_COARSE_WG = 256; // u32
-const CLIP_REDUCE_WG = 256; // u32
+  serialize() {
+    return {
+      n_draw_objects: this.n_draw_objects,
+      n_paths: this.n_paths,
+      n_clips: this.n_clips,
+      bin_data_start: this.bin_data_start,
+      path_tag_base: this.path_tag_base,
+      path_data_base: this.path_data_base,
+      draw_tag_base: this.draw_tag_base,
+      draw_data_base: this.draw_data_base,
+      transform_base: this.transform_base,
+      linewidth_base: this.linewidth_base
+    };
+  }
+
+  static deserialize( data ) {
+    return new Layout( data );
+  }
+}
 
 export class SceneBufferSizes {
   constructor( encoding ) {
     this.buffer_size = 0;
     this.path_tag_padded = 0;
 
-    let n_path_tags = encoding.path_tags.length + encoding.n_open_clips;
+    let n_path_tags = encoding.pathTagsBuf.byteLength + encoding.n_open_clips;
 
     /// Padded length of the path tag stream in bytes.
     this.path_tag_padded = align_up( n_path_tags, 4 * PATH_REDUCE_WG );
 
     /// Full size of the scene buffer in bytes.
     this.buffer_size = this.path_tag_padded
-      + encoding.path_data.length // u8
-      + ( encoding.draw_tags.length + encoding.n_open_clips ) * 4 // u32 in rust
-      + encoding.draw_data.length // u8
+      + encoding.pathDataBuf.byteLength // u8
+      + encoding.drawTagsBuf.byteLength + encoding.n_open_clips * 4 // u32 in rust
+      + encoding.drawDataBuf.byteLength // u8
       + encoding.transforms.length * 6 * 4 // 6xf32
       + encoding.linewidths.length * 4; // f32
 
     // NOTE: because of not using the glyphs feature, our patch_sizes are effectively zero
   }
-}
-
-const size_to_words = byte_size => byte_size / 4;
-
-const align_up = (len, alignment) => {
-  return len + ( ( ( ~len ) + 1 ) & ( alignment - 1 ) );
-}
-
-const next_multiple_of = ( val, rhs ) => {
-  const r = val % rhs;
-  return r === 0 ? val : val + ( rhs - r );
 }
 
 /// Uniform render configuration data used by all GPU stages.
@@ -410,30 +550,32 @@ export class ConfigUniform {
   }
 
   to_typed_array() {
-    return new Uint8Array( [
-      ...u32_to_bytes( this.width_in_tiles ),
-      ...u32_to_bytes( this.height_in_tiles ),
-      ...u32_to_bytes( this.target_width ),
-      ...u32_to_bytes( this.target_height ),
-      ...u32_to_bytes( this.base_color ),
+    const buf = new ByteBuffer( CONFIG_UNIFORM_BYTES );
 
-      // Layout
-      ...u32_to_bytes( this.layout.n_draw_objects ),
-      ...u32_to_bytes( this.layout.n_paths ),
-      ...u32_to_bytes( this.layout.n_clips ),
-      ...u32_to_bytes( this.layout.bin_data_start ),
-      ...u32_to_bytes( this.layout.path_tag_base ),
-      ...u32_to_bytes( this.layout.path_data_base ),
-      ...u32_to_bytes( this.layout.draw_tag_base ),
-      ...u32_to_bytes( this.layout.draw_data_base ),
-      ...u32_to_bytes( this.layout.transform_base ),
-      ...u32_to_bytes( this.layout.linewidth_base ),
+    buf.pushU32( this.width_in_tiles );
+    buf.pushU32( this.height_in_tiles );
+    buf.pushU32( this.target_width );
+    buf.pushU32( this.target_height );
+    buf.pushU32( this.base_color );
 
-      ...u32_to_bytes( this.binning_size ),
-      ...u32_to_bytes( this.tiles_size ),
-      ...u32_to_bytes( this.segments_size ),
-      ...u32_to_bytes( this.ptcl_size )
-    ] );
+    // Layout
+    buf.pushU32( this.layout.n_draw_objects );
+    buf.pushU32( this.layout.n_paths );
+    buf.pushU32( this.layout.n_clips );
+    buf.pushU32( this.layout.bin_data_start );
+    buf.pushU32( this.layout.path_tag_base );
+    buf.pushU32( this.layout.path_data_base );
+    buf.pushU32( this.layout.draw_tag_base );
+    buf.pushU32( this.layout.draw_data_base );
+    buf.pushU32( this.layout.transform_base );
+    buf.pushU32( this.layout.linewidth_base );
+
+    buf.pushU32( this.binning_size );
+    buf.pushU32( this.tiles_size );
+    buf.pushU32( this.segments_size );
+    buf.pushU32( this.ptcl_size );
+
+    return buf.u8Array;
   }
 }
 
@@ -515,23 +657,6 @@ export class BufferSize {
   }
 }
 
-const LAYOUT_BYTES = 10 * 4; // 10x u32
-const CONFIG_UNIFORM_BYTES = 9 * 4 + LAYOUT_BYTES; // 9x u32 + Layout
-const PATH_MONOID_BYTES = 5 * 4; // 5x u32
-const PATH_BBOX_BYTES = 6 * 4; // 4x i32, f32, u32
-const CUBIC_BYTES = 12 * 4; // 10x f32, 2x u32
-const DRAW_MONOID_BYTES = 4 * 4; // 4x u32
-const CLIP_BYTES = 2 * 4; // 2x u32
-const CLIP_ELEMENT_BYTES = 4 + 12 + 4 * 4; // u32 + 12x u8 + 4x f32
-const CLIP_BIC_BYTES = 2 * 4; // 2x u32
-const CLIP_BBOX_BYTES = 4 * 4; // 4x f32
-const DRAW_BBOX_BYTES = 4 * 4; // 4x f32
-const BUMP_ALLOCATORS_BYTES = 6 * 4; // 6x u32
-const BIN_HEADER_BYTES = 2 * 4; // 2x u32
-const PATH_BYTES = 4 * 4 + 4 + 3 * 4; // 4x f32 + u32 + 3x u32
-const TILE_BYTES = 2 * 4; // i32, u32
-const PATH_SEGMENT_BYTES = 6 * 4; // 5x f32, u32
-
 export class BufferSizes {
   // TODO: this is a GREAT place to view documentation, go to each thing!
   // // Known size buffers
@@ -598,12 +723,6 @@ export class BufferSizes {
 }
 
 export class RenderConfig {
-  // /// GPU side configuration.
-  // pub gpu: ConfigUniform,
-  // /// Workgroup counts for all compute pipelines.
-  // pub workgroup_counts: WorkgroupCounts,
-  // /// Sizes of all buffer resources.
-  // pub buffer_sizes: BufferSizes,
   constructor( layout, width, height, base_color ) {
     let new_width = next_multiple_of( width, TILE_WIDTH );
     let new_height = next_multiple_of( height, TILE_HEIGHT );
@@ -613,8 +732,17 @@ export class RenderConfig {
     let workgroup_counts = new WorkgroupCounts( layout, width_in_tiles, height_in_tiles, n_path_tags );
     let buffer_sizes = new BufferSizes( layout, workgroup_counts, n_path_tags );
 
+    this.width = width;
+    this.height = height;
+    this.base_color = base_color;
+
+    // Workgroup counts for all compute pipelines.
     this.workgroup_counts = workgroup_counts;
+
+    // Sizes of all buffer resources.
     this.buffer_sizes = buffer_sizes;
+
+    // GPU side configuration.
     this.gpu = new ConfigUniform( {
       width_in_tiles,
       height_in_tiles,
@@ -630,21 +758,117 @@ export class RenderConfig {
 
     this.config_bytes = this.gpu.to_typed_array();
   }
+
+  serialize() {
+    return {
+      width: this.width,
+      height: this.height,
+      base_color: this.base_color
+    };
+  }
+
+  static deserialize( data, layout ) {
+    return new RenderConfig( layout, data.width, data.height, data.base_color );
+  }
+}
+
+const u8ToBase64 = u8array => {
+  let string = '';
+
+	for ( let i = 0; i < u8array.byteLength; i++) {
+		string += String.fromCharCode( u8array[ i ] );
+	}
+
+	return window.btoa( string );
+}
+
+function base64ToU8( base64 ) {
+  const string = window.atob( base64 );
+
+  var bytes = new Uint8Array( string.length );
+  for ( let i = 0; i < string.length; i++ ) {
+    bytes[ i ] = string.charCodeAt( i );
+  }
+
+  return bytes;
+}
+
+export class RenderInfo {
+  constructor( options ) {
+
+    this.packed = options.packed;
+    this.layout = options.layout;
+    this.ramps = options.ramps;
+    this.images = options.images;
+    this.renderConfig = null; // generated with prepareRender
+  }
+
+  // TODO: get serialization properly working? OR STRIP IT OUT
+  serialize() {
+    return {
+      packed: u8ToBase64( this.packed ),
+      layout: this.layout.serialize(),
+      ramps: {
+        width: this.ramps.width,
+        height: this.ramps.height,
+        data: u8ToBase64( this.ramps.data )
+      },
+      images: {
+        width: this.images.width,
+        height: this.images.height,
+        images: this.images.images.map( image => ( {
+          x: image.x,
+          y: image.y,
+          image: image.image.serialize()
+        } ) )
+      },
+      renderConfig: this.renderConfig === null ? null : this.renderConfig.serialize()
+    };
+  }
+
+  prepareRender( width, height, base_color ) {
+    this.renderConfig = new RenderConfig( this.layout, width, height, base_color );
+  }
+
+  static deserialize( data ) {
+    const renderInfo = new RenderInfo( {
+      packed: base64ToU8( data.packed ),
+      layout: Layout.deserialize( data.layout ),
+      ramps: {
+        width: data.ramps.width,
+        height: data.ramps.height,
+        data: base64ToU8( data.ramps.data )
+      },
+      images: {
+        width: data.images.width,
+        height: data.images.height,
+        images: data.images.images.map( image => ( {
+          x: image.x,
+          y: image.y,
+          image: BufferImage.deserialize( image.image )
+        } ) )
+      }
+    } );
+
+    if ( data.renderConfig !== null ) {
+      renderInfo.prepareRender( data.renderConfig.width, data.renderConfig.height, data.renderConfig.base_color );
+    }
+
+    return renderInfo;
+  }
 }
 
 // TODO: TS
 export default class Encoding {
   constructor() {
-    // TODO: Typed arrays probably more efficient, do that once working.
-
     /// The path tag stream.
-    this.path_tags = []; // Vec<PathTag> e.g. u8 in rust, number[] in js
+    this.pathTagsBuf = new ByteBuffer(); // path_tags
     /// The path data stream.
-    this.path_data = []; // Vec<u8> in rust, number[] in js (OF THE BYTES) - use f32_to_bytes for now
+    this.pathDataBuf = new ByteBuffer(); // path_data
     /// The draw tag stream.
-    this.draw_tags = []; // Vec<DrawTag> e.g. u32 in rust, number[] in js
+    this.drawTagsBuf = new ByteBuffer(); // draw_tags // NOTE: was u32 array (effectively) in rust
     /// The draw data stream.
-    this.draw_data = []; // Vec<u8> in rust, number[] in js
+    this.drawDataBuf = new ByteBuffer(); // draw_data
     /// The transform stream.
     this.transforms = []; // Vec<Transform> in rust, Affine[] in js
     /// The line width stream.
@@ -676,17 +900,17 @@ export default class Encoding {
   static PATH_NONEMPTY_SUBPATH = 0x3;
 
   is_empty() {
-    return this.path_tags.length === 0;
+    return this.pathTagsBuf.byteLength === 0;
   }
 
   /// Clears the encoding.
   reset( is_fragment ) {
     this.transforms.length = 0;
-    this.path_tags.length = 0;
-    this.path_data.length = 0;
+    this.pathTagsBuf.clear();
+    this.pathDataBuf.clear();
     this.linewidths.length = 0;
-    this.draw_data.length = 0;
-    this.draw_tags.length = 0;
+    this.drawDataBuf.clear();
+    this.drawTagsBuf.clear();
     this.n_paths = 0;
     this.n_path_segments = 0;
     this.n_clips = 0;
@@ -701,12 +925,12 @@ export default class Encoding {
 
   /// Appends another encoding to this one with an optional transform.
   append( other, transform = null ) {
-    const initial_draw_data_length = this.draw_data.length;
+    const initial_draw_data_length = this.drawDataBuf.byteLength;
 
-    this.path_tags.push( ...other.path_tags );
-    this.path_data.push( ...other.path_data );
-    this.draw_tags.push( ...other.draw_tags );
-    this.draw_data.push( ...other.draw_data );
+    this.pathTagsBuf.pushByteBuffer( other.pathTagsBuf );
+    this.pathDataBuf.pushByteBuffer( other.pathDataBuf );
+    this.drawTagsBuf.pushByteBuffer( other.drawTagsBuf );
+    this.drawDataBuf.pushByteBuffer( other.drawDataBuf );
     this.n_paths += other.n_paths;
     this.n_path_segments += other.n_path_segments;
     this.n_clips += other.n_clips;
@@ -728,7 +952,7 @@ export default class Encoding {
   /// Encodes a linewidth.
   encode_linewidth( linewidth ) {
     if ( this.linewidths[ this.linewidths.length - 1 ] !== linewidth ) {
-      this.path_tags.push( PathTag.LINEWIDTH );
+      this.pathTagsBuf.pushU8( PathTag.LINEWIDTH );
       this.linewidths.push( linewidth );
     }
   }
@@ -740,7 +964,7 @@ export default class Encoding {
   encode_transform( transform ) {
     const last = this.transforms[ this.transforms.length - 1 ];
     if ( !last || !last.equals( transform ) ) {
-      this.path_tags.push( PathTag.TRANSFORM );
+      this.pathTagsBuf.pushU8( PathTag.TRANSFORM );
       this.transforms.push( transform );
       return true;
     }
@@ -768,13 +992,12 @@ export default class Encoding {
     this.first_point.x = x;
     this.first_point.y = y;
     if ( this.state === Encoding.PATH_MOVE_TO ) {
-      this.path_data.length = this.path_data.length - 8;
+      this.pathDataBuf.byteLength -= 8;
     } else if ( this.state === Encoding.PATH_NONEMPTY_SUBPATH ) {
-      if ( this.path_tags.length ) {
-        this.path_tags[ this.path_tags.length - 1 ] = PathTag.with_subpath_end( this.path_tags[ this.path_tags.length - 1 ] );
-      }
+      this.setSubpathEndTag();
     }
-    this.path_data.push( ...f32_to_bytes( x ), ...f32_to_bytes( y ) );
+    this.pathDataBuf.pushF32( x );
+    this.pathDataBuf.pushF32( y );
     this.state = Encoding.PATH_MOVE_TO;
   }
 
@@ -789,8 +1012,9 @@ export default class Encoding {
       }
       this.move_to( this.first_point.x, this.first_point.y );
     }
-    this.path_data.push( ...f32_to_bytes( x ), ...f32_to_bytes( y ) );
-    this.path_tags.push( PathTag.LINE_TO_F32 );
+    this.pathDataBuf.pushF32( x );
+    this.pathDataBuf.pushF32( y );
+    this.pathTagsBuf.pushU8( PathTag.LINE_TO_F32 );
     this.state = Encoding.PATH_NONEMPTY_SUBPATH;
     this.n_encoded_segments += 1;
   }
@@ -804,8 +1028,11 @@ export default class Encoding {
       }
       this.move_to( this.first_point.x, this.first_point.y );
     }
-    this.path_data.push( ...f32_to_bytes( x1 ), ...f32_to_bytes( y1 ), ...f32_to_bytes( x2 ), ...f32_to_bytes( y2 ) );
-    this.path_tags.push( PathTag.QUAD_TO_F32 );
+    this.pathDataBuf.pushF32( x1 );
+    this.pathDataBuf.pushF32( y1 );
+    this.pathDataBuf.pushF32( x2 );
+    this.pathDataBuf.pushF32( y2 );
+    this.pathTagsBuf.pushU8( PathTag.QUAD_TO_F32 );
     this.state = Encoding.PATH_NONEMPTY_SUBPATH;
     this.n_encoded_segments += 1;
   }
@@ -819,8 +1046,13 @@ export default class Encoding {
       }
       this.move_to( this.first_point.x, this.first_point.y );
     }
-    this.path_data.push( ...f32_to_bytes( x1 ), ...f32_to_bytes( y1 ), ...f32_to_bytes( x2 ), ...f32_to_bytes( y2 ), ...f32_to_bytes( x3 ), ...f32_to_bytes( y3 ) );
-    this.path_tags.push( PathTag.CUBIC_TO_F32 );
+    this.pathDataBuf.pushF32( x1 );
+    this.pathDataBuf.pushF32( y1 );
+    this.pathDataBuf.pushF32( x2 );
+    this.pathDataBuf.pushF32( y2 );
+    this.pathDataBuf.pushF32( x3 );
+    this.pathDataBuf.pushF32( y3 );
+    this.pathTagsBuf.pushU8( PathTag.CUBIC_TO_F32 );
     this.state = Encoding.PATH_NONEMPTY_SUBPATH;
     this.n_encoded_segments += 1;
   }
@@ -831,29 +1063,24 @@ export default class Encoding {
       return;
     }
     else if ( this.state === Encoding.PATH_MOVE_TO ) {
-      this.path_data.length = this.path_data.length - 8;
+      this.pathDataBuf.byteLength -= 8;
       this.state = Encoding.PATH_START;
       return;
     }
-    let len = this.path_data.length;
+    const len = this.pathDataBuf.byteLength / 4;
     if ( len < 8 ) {
       // can't happen
       return;
     }
-    let first_bytes = [ ...f32_to_bytes( this.first_point.x ), ...f32_to_bytes( this.first_point.y ) ];
-    if ( first_bytes[ 0 ] !== this.path_data[ len - 8 ] ||
-         first_bytes[ 1 ] !== this.path_data[ len - 7 ] ||
-         first_bytes[ 2 ] !== this.path_data[ len - 6 ] ||
-         first_bytes[ 3 ] !== this.path_data[ len - 5 ] ||
-         first_bytes[ 4 ] !== this.path_data[ len - 4 ] ||
-         first_bytes[ 5 ] !== this.path_data[ len - 3 ] ||
-         first_bytes[ 6 ] !== this.path_data[ len - 2 ] ||
-         first_bytes[ 7 ] !== this.path_data[ len - 1 ] ) {
-      this.path_data.push( ...first_bytes );
-      this.path_tags.push( PathTag.with_subpath_end( PathTag.LINE_TO_F32 ) );
+    const lastX = this.pathDataBuf.fullF32Array[ len - 2 ];
+    const lastY = this.pathDataBuf.fullF32Array[ len - 1 ];
+    if ( Math.abs( lastX - this.first_point.x ) > 1e-8 || Math.abs( lastY - this.first_point.y ) > 1e-8 ) {
+      this.pathDataBuf.pushF32( this.first_point.x );
+      this.pathDataBuf.pushF32( this.first_point.y );
+      this.pathTagsBuf.pushU8( PathTag.with_subpath_end( PathTag.LINE_TO_F32 ) );
       this.n_encoded_segments += 1;
-    } else if ( this.path_tags.length ) {
-      this.path_tags[ this.path_tags.length - 1 ] = PathTag.with_subpath_end( this.path_tags[ this.path_tags.length - 1 ] );
+    } else {
+      this.setSubpathEndTag();
     }
     this.state = Encoding.PATH_START;
   }
@@ -868,12 +1095,10 @@ export default class Encoding {
       this.close();
     }
     if ( this.state === Encoding.PATH_MOVE_TO ) {
-      this.path_data.length = this.path_data.length - 8;
+      this.pathDataBuf.byteLength -= 8;
     }
     if ( this.n_encoded_segments !== 0 ) {
-      if ( this.path_tags.length ) {
-        this.path_tags[ this.path_tags.length - 1 ] = PathTag.with_subpath_end( this.path_tags[ this.path_tags.length - 1 ] );
-      }
+      this.setSubpathEndTag();
       this.n_path_segments += this.n_encoded_segments;
       if ( insert_path_marker ) {
         this.insert_path_marker();
@@ -882,84 +1107,30 @@ export default class Encoding {
     return this.n_encoded_segments;
   }
 
+  setSubpathEndTag() {
+    if ( this.pathTagsBuf.byteLength ) {
+      // In-place replace, add the "subpath end" flag
+      const lastIndex = this.pathTagsBuf.byteLength - 1;
+
+      this.pathTagsBuf.fullU8Array[ lastIndex ] = PathTag.with_subpath_end( this.pathTagsBuf.fullU8Array[ lastIndex ] );
+    }
+  }
+
   // Exposed for glyph handling
   insert_path_marker() {
-    this.path_tags.push( PathTag.PATH );
+    this.pathTagsBuf.pushU8( PathTag.PATH );
     this.n_paths += 1;
   }
 
-  // To encode a kite shape, we'll need to split arcs/elliptical-arcs into bezier curves
-  // TODO: don't keep Kite things in here, we'd move it to Kite
-  encode_kite_shape( shape, isFill, insertPathMarker, tolerance ) {
-    this.encode_path( isFill );
-
-    shape.subpaths.forEach( subpath => {
-      if ( subpath.isDrawable() ) {
-        const startPoint = subpath.getFirstSegment().start;
-        this.move_to( startPoint.x, startPoint.y );
-
-        subpath.segments.forEach( segment => {
-          if ( segment instanceof phet.kite.Line ) {
-            this.line_to( segment.end.x, segment.end.y );
-          }
-          else if ( segment instanceof phet.kite.Quadratic ) {
-            this.quad_to( segment.control.x, segment.control.y, segment.end.x, segment.end.y );
-          }
-          else if ( segment instanceof phet.kite.Cubic ) {
-            this.cubic_to( segment.control1.x, segment.control1.y, segment.control2.x, segment.control2.y, segment.end.x, segment.end.y );
-          }
-          else {
-            // arc or elliptical arc, split with kurbo's setup (not the most optimal).
-            // See https://raphlinus.github.io/curves/2021/03/11/bezier-fitting.html for better.
-
-            const maxRadius = segment instanceof phet.kite.Arc ? segment.radius : Math.max( segment.radiusX, segment.radiusY );
-            const scaled_err = maxRadius / tolerance;
-            const n_err = Math.max( Math.pow( 1.1163 * scaled_err, 1 / 6 ), 3.999999 );
-            const n = Math.ceil( n_err * Math.abs( segment.getAngleDifference() ) * ( 1.0 / ( 2.0 * Math.PI ) ) );
-
-            // For now, evenly subdivide
-            const segments = n > 1 ? segment.subdivisions( _.range( 1, n ).map( t => t / n ) ) : [ segment ];
-
-            // Create cubics approximations for each segment
-            // TODO: performance optimize?
-            segments.forEach( subSegment => {
-              const start = subSegment.start;
-              const middle = subSegment.positionAt( 0.5 );
-              const end = subSegment.end;
-
-              // 1/4 start, 1/4 end, 1/2 control, find the control point given the middle (t=0.5) point
-              // average + 2 * ( middle - average ) => 2 * middle - average => 2 * middle - ( start + end ) / 2
-
-              // const average = start.average( end );
-              // const control = average.plus( middle.minus( average ).timesScalar( 2 ) );
-
-              // mutates middle also
-              const control = start.plus( end ).multiplyScalar( -0.5 ).add( middle.multiplyScalar( 2 ) );
-
-              this.quad_to( control.x, control.y, end.x, end.y );
-            } );
-          }
-        } );
-
-        if ( subpath.closed ) {
-          this.close();
-        }
-      }
-    } );
-
-    this.finish( insertPathMarker );
-  };
-
-
   /// Encodes a solid color brush.
   encode_color( color ) {
-    this.draw_tags.push( DrawTag.COLOR );
-    this.draw_data.push( ...u32_to_bytes( to_premul_u32( color ) ) );
+    this.drawTagsBuf.pushU32( DrawTag.COLOR );
+    this.drawDataBuf.pushU32( to_premul_u32( color ) );
   }
 
   // zero: => false, one => color, many => true (icky)
   add_ramp( color_stops, alpha, extend ) {
-    let offset = this.draw_data.length;
+    let offset = this.drawDataBuf.byteLength;
     let stops_start = this.color_stops.length;
     if ( alpha !== 1 ) {
       this.color_stops.push( ...color_stops.map( stop => new ColorStop( stop.offset, with_alpha_factor( stop.color, alpha ) ) ) );
@@ -995,16 +1166,12 @@ export default class Encoding {
       this.encode_color( 0 );
     }
     else if ( result === true ) {
-      this.draw_tags.push( DrawTag.LINEAR_GRADIENT );
-      this.draw_data.push( ...[
-        // u32 ramp index
-        0, 0, 0, 0,
-
-        ...f32_to_bytes( x0 ),
-        ...f32_to_bytes( y0 ),
-        ...f32_to_bytes( x1 ),
-        ...f32_to_bytes( y1 )
-      ] );
+      this.drawTagsBuf.pushU32( DrawTag.LINEAR_GRADIENT );
+      this.drawDataBuf.pushU32( 0 ); // ramp index, will get filled in
+      this.drawDataBuf.pushF32( x0 );
+      this.drawDataBuf.pushF32( y0 );
+      this.drawDataBuf.pushF32( x1 );
+      this.drawDataBuf.pushF32( y1 );
     }
     else {
       this.encode_color( result );
@@ -1025,19 +1192,14 @@ export default class Encoding {
         this.encode_color( 0 );
       }
       else if ( result === true ) {
-        this.draw_tags.push( DrawTag.RADIAL_GRADIENT );
-        this.draw_data.push( ...[
-          // u32 ramp index
-          0, 0, 0, 0,
-
-          ...f32_to_bytes( x0 ),
-          ...f32_to_bytes( y0 ),
-          ...f32_to_bytes( x1 ),
-          ...f32_to_bytes( y1 ),
-
-          ...f32_to_bytes( r0 ),
-          ...f32_to_bytes( r1 )
-        ] );
+        this.drawTagsBuf.pushU32( DrawTag.RADIAL_GRADIENT );
+        this.drawDataBuf.pushU32( 0 ); // ramp index, will get filled in
+        this.drawDataBuf.pushF32( x0 );
+        this.drawDataBuf.pushF32( y0 );
+        this.drawDataBuf.pushF32( x1 );
+        this.drawDataBuf.pushF32( y1 );
+        this.drawDataBuf.pushF32( r0 );
+        this.drawDataBuf.pushF32( r1 );
       }
       else {
         this.encode_color( result );
@@ -1045,30 +1207,30 @@ export default class Encoding {
     }
   }
 
-  /// Encodes an image brush.  (( ImageStub)
+  /// Encodes an image brush.  (( BufferImage)
   encode_image( image ) {
     this.patches.push( {
       type: 'image',
-      draw_data_offset: this.draw_data.length,
-      image: image
+      draw_data_offset: this.drawDataBuf.byteLength,
+      image: image // BufferImage
     } );
-    this.draw_tags.push( DrawTag.IMAGE );
-    this.draw_data.push( ...[
-      /// Packed atlas coordinates. (xy) u32
-      ...u32_to_bytes( 0 ),
-      /// Packed image dimensions. (width_height) u32
-      ...u32_to_bytes( ( ( image.width << 16 ) >>> 0 ) | ( image.height & 0xFFFF ) )
-    ] );
+    this.drawTagsBuf.pushU32( DrawTag.IMAGE );
+
+    // packed atlas coordinates (xy) u32
+    this.drawDataBuf.pushU32( 0 );
+
+    // Packed image dimensions. (width_height) u32
+    this.drawDataBuf.pushU32( ( ( image.width << 16 ) >>> 0 ) | ( image.height & 0xFFFF ) );
   }
 
   /// Encodes a begin clip command.
   encode_begin_clip( mix, compose, alpha ) {
-    this.draw_tags.push( DrawTag.BEGIN_CLIP );
-    this.draw_data.push( ...[
-      // u32 combination of mix and compose
-      ...u32_to_bytes( ( ( mix << 8 ) >>> 0 ) | compose ),
-      ...f32_to_bytes( alpha )
-    ] );
+    this.drawTagsBuf.pushU32( DrawTag.BEGIN_CLIP );
+
+    // u32 combination of mix and compose
+    this.drawDataBuf.pushU32( ( ( mix << 8 ) >>> 0 ) | compose );
+    this.drawDataBuf.pushF32( alpha );
+
     this.n_clips += 1;
     this.n_open_clips += 1;
   }
@@ -1076,9 +1238,9 @@ export default class Encoding {
   /// Encodes an end clip command.
   encode_end_clip() {
     if ( this.n_open_clips > 0 ) {
-      this.draw_tags.push( DrawTag.END_CLIP );
+      this.drawTagsBuf.pushU32( DrawTag.END_CLIP );
       // This is a dummy path, and will go away with the new clip impl.
-      this.path_tags.push( PathTag.PATH );
+      this.pathTagsBuf.pushU8( PathTag.PATH );
       this.n_paths += 1;
       this.n_clips += 1;
       this.n_open_clips -= 1;
@@ -1095,10 +1257,10 @@ export default class Encoding {
   }
 
   print_debug() {
-    console.log( `path_tags\n${this.path_tags.map( x => x.toString() ).join( ', ' )}` );
-    console.log( `path_data\n${this.path_data.map( x => x.toString() ).join( ', ' )}` );
-    console.log( `draw_tags\n${this.draw_tags.map( x => x.toString() ).join( ', ' )}` );
-    console.log( `draw_data\n${this.draw_data.map( x => x.toString() ).join( ', ' )}` );
+    console.log( `path_tags\n${this.pathTagsBuf.u8Array.map( x => x.toString() ).join( ', ' )}` );
+    console.log( `path_data\n${this.pathDataBuf.u8Array.map( x => x.toString() ).join( ', ' )}` );
+    console.log( `draw_tags\n${this.drawTagsBuf.u8Array.map( x => x.toString() ).join( ', ' )}` );
+    console.log( `draw_data\n${this.drawDataBuf.u8Array.map( x => x.toString() ).join( ', ' )}` );
     console.log( `transforms\n${this.transforms.map( x => `_ a00:${x.a00} a10:${x.a10} a01:${x.a01} a11:${x.a11} a02:${x.a02} a12:${x.a12}_` ).join( '\n' )}` );
     console.log( `linewidths\n${this.linewidths.map( x => x.toString() ).join( ', ' )}` );
     console.log( `n_paths\n${this.n_paths}` );
@@ -1107,155 +1269,101 @@ export default class Encoding {
     console.log( `n_open_clips\n${this.n_open_clips}` );
   }
 
-  prepareRender( width, height, base_color ) {
-    const resolved = this.resolve();
-
-    const renderConfig = new RenderConfig( resolved.layout, width, height, base_color );
-
-    return {
-      ...resolved,
-      renderConfig
-    }
-  }
-
   /// Resolves late bound resources and packs an encoding. Returns the packed
   /// layout and computed ramp data.
-  resolve() {
-    const NUM_RAMP_SAMPLES = 512;
-    let numRamps = 0;
-    let rampData = [];
+  resolve( deviceContext ) {
 
-    // TODO: image atlas
-    const imageWidth = 1024;
-    const imageHeight = 1024;
-    const images = [];
+    const rampPatches = this.patches.filter( patch => patch.type === 'ramp' );
+    deviceContext.ramps.updatePatches( rampPatches );
 
-    this.patches.forEach( patch => {
-      if ( patch.type === 'image' ) {
-        // { type: 'image', draw_data_offset: number, image: ImageStub }
-        // TODO: image atlas (we have BinPacker?)
-        const x = 0;
-        const y = 0;
-        // TODO: eeek, don't modify the xy of the stub image, include our own wrapper
-        patch.image.xy.x = x;
-        patch.image.xy.y = y;
-        images.push( {
-          image: patch.image,
-          x: x,
-          y: y
-        } );
-      }
-      else if ( patch.type === 'ramp' ) {
-        // { type: 'ramp', draw_data_offset: number, stops: number[], extend: number }
+    const imagePatches = this.patches.filter( patch => patch.type === 'image' );
+    deviceContext.atlas.updatePatches( imagePatches );
 
-        // TODO: cache ramps (we burn a lot of data!!!)
-        patch.id = numRamps++;
-        rampData.push( ...make_ramp( patch.stops, NUM_RAMP_SAMPLES ) );
-      }
-    } );
-
-    // TODO: typed array (we'll need to convert it later)
-    const data = [];
     const layout = new Layout();
     layout.n_paths = this.n_paths;
     layout.n_clips = this.n_clips;
 
     const sceneBufferSizes = new SceneBufferSizes( this );
-    // data.reserve(buffer_size);
     const buffer_size = sceneBufferSizes.buffer_size;
     const path_tag_padded = sceneBufferSizes.path_tag_padded;
 
+    const dataBuf = new ByteBuffer( sceneBufferSizes.buffer_size );
+
     // Path tag stream
-    layout.path_tag_base = size_to_words( data.length );
-    data.push( ...this.path_tags );
+    layout.path_tag_base = size_to_words( dataBuf.byteLength );
+    dataBuf.pushByteBuffer( this.pathTagsBuf );
     // TODO: what if we... just error if there are open clips? Why are we padding the streams to make this work?
     for ( let i = 0; i < this.n_open_clips; i++ ) {
-      data.push( PathTag.PATH );
+      dataBuf.pushU8( PathTag.PATH );
     }
-    // TODO: probably a more elegant way in the future, especially when typed array
-    while ( data.length < path_tag_padded ) {
-      data.push( 0 );
-    }
+    dataBuf.byteLength = path_tag_padded;
 
     // Path data stream
-    layout.path_data_base = size_to_words( data.length );
-    data.push( ...this.path_data );
+    layout.path_data_base = size_to_words( dataBuf.byteLength );
+    dataBuf.pushByteBuffer( this.pathDataBuf );
 
     // Draw tag stream
-    layout.draw_tag_base = size_to_words( data.length );
+    layout.draw_tag_base = size_to_words( dataBuf.byteLength );
     // Bin data follows draw info
-    layout.bin_data_start = _.sum( this.draw_tags.map( DrawTag.info_size ) );
-    data.push( ...( _.flatten( this.draw_tags.map( u32_to_bytes ) ) ) );
+    layout.bin_data_start = _.sum( this.drawTagsBuf.u32Array.map( DrawTag.info_size ) );
+    dataBuf.pushByteBuffer( this.drawTagsBuf );
     for ( let i = 0; i < this.n_open_clips; i++ ) {
-      data.push( ...u32_to_bytes( DrawTag.END_CLIP ) );
+      dataBuf.pushU32( DrawTag.END_CLIP );
     }
 
     // Draw data stream
-    layout.draw_data_base = size_to_words( data.length );
+    layout.draw_data_base = size_to_words( dataBuf.byteLength );
     {
-      // TODO: a bit simpler to just draw all of it in, then do the ramp/image stuff? get it working first
-      let pos = 0;
+      const drawDataOffset = dataBuf.byteLength;
+      dataBuf.pushByteBuffer( this.drawDataBuf );
+
       this.patches.forEach( patch => {
-        if ( pos < patch.draw_data_offset ) {
-          data.push( ...this.draw_data.slice( pos, patch.draw_data_offset ) );
-        }
-        pos = patch.draw_data_offset;
+        const byteOffset = drawDataOffset + patch.draw_data_offset;
+        let bytes;
+
         if ( patch.type === 'ramp' ) {
-          data.push( ...u32_to_bytes( ( ( patch.id << 2 ) >>> 0 ) | patch.extend ) );
-          pos += 4;
+          bytes = u32_to_bytes( ( ( patch.id << 2 ) >>> 0 ) | patch.extend );
         }
         else if ( patch.type === 'image' ) {
-          data.push( ...u32_to_bytes( ( patch.image.xy.x << 16 ) >>> 0 | patch.image.xy.y ) );
-          pos += 4;
+          bytes = u32_to_bytes( ( patch.atlasSubImage.x << 16 ) >>> 0 | patch.atlasSubImage.y );
           // TODO: assume the image fit (if not, we'll need to do something else)
         }
         else {
           throw new Error( 'unknown patch type' );
         }
+
+        // Patch data directly into our full output
+        dataBuf.fullU8Array.set( bytes, byteOffset );
       } );
-      if ( pos < this.draw_data.length ) {
-        data.push( ...this.draw_data.slice( pos ) );
-      }
     }
 
     // Transform stream
-    layout.transform_base = size_to_words( data.length );
-    data.push( ...( _.flatten( this.transforms.map( transform => {
-      return [
-        ...f32_to_bytes( transform.a00 ),
-        ...f32_to_bytes( transform.a10 ),
-        ...f32_to_bytes( transform.a01 ),
-        ...f32_to_bytes( transform.a11 ),
-        ...f32_to_bytes( transform.a02 ),
-        ...f32_to_bytes( transform.a12 )
-      ];
-    } ) ) ) );
+    layout.transform_base = size_to_words( dataBuf.byteLength );
+    for ( let i = 0; i < this.transforms.length; i++ ) {
+      const transform = this.transforms[ i ];
+      dataBuf.pushF32( transform.a00 );
+      dataBuf.pushF32( transform.a10 );
+      dataBuf.pushF32( transform.a01 );
+      dataBuf.pushF32( transform.a11 );
+      dataBuf.pushF32( transform.a02 );
+      dataBuf.pushF32( transform.a12 );
+    }
 
     // Linewidth stream
-    layout.linewidth_base = size_to_words( data.length );
-    data.push( ...( _.flatten( this.linewidths.map( f32_to_bytes ) ) ) );
+    layout.linewidth_base = size_to_words( dataBuf.byteLength );
+    for ( let i = 0; i < this.linewidths.length; i++ ) {
+      dataBuf.pushF32( this.linewidths[ i ] );
+    }
 
     layout.n_draw_objects = layout.n_paths;
 
-    if ( data.length !== buffer_size ) {
+    if ( dataBuf.byteLength !== buffer_size ) {
       throw new Error( 'buffer size mismatch' );
     }
 
-    return {
-      packed: new Uint8Array( data ),
-      layout: layout,
-
-      // TODO: ramp_cache.ramps(), image_cache.images()
-      ramps: {
-        width: numRamps === 0 ? 0 : NUM_RAMP_SAMPLES,
-        height: numRamps,
-        data: new Uint8Array( rampData )
-      },
-      images: {
-        width: imageWidth,
-        height: imageHeight,
-        images: images
-      }
-    };
+    return new RenderInfo( {
+      packed: dataBuf.u8Array,
+      layout: layout
+    } );
   }
 }

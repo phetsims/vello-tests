@@ -1,6 +1,12 @@
 
 import { VelloEncoding } from "../pkg/vello_tests.js";
 
+// NOTE:
+// // console.log( memory.buffer.byteLength );
+// from
+// wasmInit().then( async wasm => {
+//  const memory = wasm.memory;
+
 // An adapter for the WASM rust encoding code
 // TODO: interface/supertype for WASM and JS encodings
 export default class WASMEncoding {

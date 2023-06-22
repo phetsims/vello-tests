@@ -1,9 +1,8 @@
-import BufferPool from "./BufferPool.js";
+import BufferPool from './BufferPool.js';
 import Shader from './Shader.js';
 
-const render = ( sceneFrame, device, outTexture ) => {
-  const width = outTexture.width;
-  const height = outTexture.height;
+const render = ( renderInfo, deviceContext, outTexture ) => {
+  const device = deviceContext.device;
 
   const shaders = Shader.getShaders( device );
 
@@ -12,24 +11,8 @@ const render = ( sceneFrame, device, outTexture ) => {
     throw new Error( 'unsupported format' );
   }
 
-  const renderInfo = sceneFrame.sceneEncoding.prepareRender( width, height, 0x666666ff );
-
-  // TODO: don't hard-code base_color
-  // TODO: rename
   const renderConfig = renderInfo.renderConfig;
-
   const sceneBytes = renderInfo.packed;
-
-  const ramps = renderInfo.ramps.data;
-  const rampsWidth = renderInfo.ramps.width;
-  const rampsHeight = renderInfo.ramps.height;
-  const hasRamps = rampsHeight > 0;
-
-  // TODO: hook up images
-  const images = renderInfo.images.images; // TODO
-  const imagesWidth = renderInfo.images.width;
-  const imagesHeight = renderInfo.images.height;
-  const hasImages = images.length > 0;
 
   const workgroupCounts = renderConfig.workgroup_counts;
   const bufferSizes = renderConfig.buffer_sizes;
@@ -62,8 +45,7 @@ const render = ( sceneFrame, device, outTexture ) => {
     configBuffer, sceneBuffer, reducedBuffer
   ] );
 
-  // TODO: rename?
-  let pathtag_parent = reducedBuffer;
+  let pathTagParentBuffer = reducedBuffer;
 
   let reduced2Buffer;
   let reducedScanBuffer;
@@ -80,13 +62,13 @@ const render = ( sceneFrame, device, outTexture ) => {
       reducedBuffer, reduced2Buffer, reducedScanBuffer
     ] );
 
-    pathtag_parent = reducedScanBuffer;
+    pathTagParentBuffer = reducedScanBuffer;
   }
 
   const tagmonoidBuffer = bufferPool.getBuffer( bufferSizes.path_monoids.size_in_bytes(), 'tagmonoid buffer' );
 
   ( workgroupCounts.use_large_path_scan ? shaders.pathtag_scan_large : shaders.pathtag_scan_small ).dispatch( encoder, workgroupCounts.path_scan, [
-    configBuffer, sceneBuffer, pathtag_parent, tagmonoidBuffer
+    configBuffer, sceneBuffer, pathTagParentBuffer, tagmonoidBuffer
   ] );
 
   bufferPool.freeBuffer( reducedBuffer );
@@ -196,15 +178,8 @@ const render = ( sceneFrame, device, outTexture ) => {
   bufferPool.freeBuffer( pathBuffer );
   bufferPool.freeBuffer( bumpBuffer );
 
-  // let out_image = ImageProxy::new(params.width, params.height, ImageFormat::Rgba8);
-  //
-  // // NOTE: not apparently using robust for wasm?
-      // Note: in the wasm case, we're currently not running the robust
-      // pipeline, as it requires more async wiring for the readback.
-  // if robust {
-  //     recording.download(*bump_buf.as_buf().unwrap());
-  // }
 
+  // NOTE: This is relevant code for if we want to render to a different texture (how to create it)
   // const outImage = device.createTexture( {
   //   label: 'outImage',
   //   size: {
@@ -222,85 +197,12 @@ const render = ( sceneFrame, device, outTexture ) => {
   //   dimension: '2d'
   // } );
 
-  const gradientWidth = hasRamps ? rampsWidth : 1;
-  const gradientHeight = hasRamps ? rampsHeight : 1;
-  const gradientImage = device.createTexture( {
-    label: 'gradientImage',
-    size: {
-      width: gradientWidth,
-      height: gradientHeight,
-      depthOrArrayLayers: 1
-    },
-    format: 'rgba8unorm',
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
-  } );
-
-  const gradientImageView = gradientImage.createView( {
-    label: 'gradientImageView',
-    format: 'rgba8unorm',
-    dimension: '2d'
-  } );
-
-  if ( hasRamps ) {
-    const block_size = 4;
-    device.queue.writeTexture( {
-      texture: gradientImage
-    }, ramps.buffer, {
-      offset: 0,
-      bytesPerRow: rampsWidth * block_size
-    }, {
-      width: gradientWidth,
-      height: gradientHeight,
-      depthOrArrayLayers: 1
-    } );
-  }
-
-  // TODO: Do we have "repeat" on images also? Think repeating patterns! Also alpha
-  const atlasWidth = hasImages ? imagesWidth : 1;
-  const atlasHeight = hasImages ? imagesHeight : 1;
-  const atlasImage = device.createTexture( {
-    label: 'atlasImage',
-    size: {
-      width: atlasWidth,
-      height: atlasHeight,
-      depthOrArrayLayers: 1
-    },
-    format: 'rgba8unorm',
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
-  } );
-  const atlasImageView = atlasImage.createView( {
-    label: 'atlasImageView',
-    format: 'rgba8unorm',
-    dimension: '2d'
-  } );
-
-  // TODO TODO: images
-  if ( hasImages ) {
-    for ( let i = 0; i < images.length; i++ ) {
-      const imageInfo = images[ i ];
-      const image = imageInfo.image;
-      const x = imageInfo.x;
-      const y = imageInfo.y;
-
-      const block_size = 4;
-
-      device.queue.writeTexture( {
-        texture: atlasImage,
-        origin: { x, y, z: 0 }
-      }, image.buffer, {
-        offset: 0,
-        bytesPerRow: image.width * block_size
-      }, {
-        width: image.width,
-        height: image.height,
-        depthOrArrayLayers: 1
-      } );
-    }
-  }
+  deviceContext.ramps.updateTexture();
+  deviceContext.atlas.updateTexture();
 
   // Have the fine-rasterization shader use the preferred format as output (for now)
   ( preferredFormat === 'bgra8unorm' ? shaders.fine_bgra8unorm : shaders.fine_rgba8unorm ).dispatch( encoder, workgroupCounts.fine, [
-    configBuffer, tileBuffer, segmentsBuffer, outTexture.createView(), ptclBuffer, gradientImageView, infoBinDataBuffer, atlasImageView
+    configBuffer, tileBuffer, segmentsBuffer, outTexture.createView(), ptclBuffer, deviceContext.ramps.textureView, infoBinDataBuffer, deviceContext.atlas.textureView
   ] );
 
   // NOTE: bgra8unorm vs rgba8unorm can't be copied, so this depends on the platform?
@@ -322,11 +224,10 @@ const render = ( sceneFrame, device, outTexture ) => {
 
   const commandBuffer = encoder.finish();
   device.queue.submit( [ commandBuffer ] );
+  // device.queue.onSubmittedWorkDone().then( () => {} );
 
   // for now TODO: can we reuse? Likely get some from reusing these
   configBuffer.destroy();
-  gradientImage.destroy();
-  atlasImage.destroy();
 
   bufferPool.nextGeneration();
 };
