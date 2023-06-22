@@ -64,7 +64,7 @@ pub fn shape_text(text: &str, is_ltr: bool) -> String {
                     result.push_str( "," );
                 }
                 is_first = false;
-                result.push_str( &format!( "{{id:{},x:{},y:{},adv:{}}}", glyph.id, glyph.x, glyph.y, glyph.advance ) );
+                result.push_str( &format!( "{{\"id\":{},\"x\":{},\"y\":{},\"adv\":{}}}", glyph.id, glyph.x, glyph.y, glyph.advance ) );
             }
         });
         result.push_str("]");

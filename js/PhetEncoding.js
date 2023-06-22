@@ -1,4 +1,5 @@
-import { default as Encoding, Affine, Extend, Mix, Compose, ColorStop, BufferImage } from './Encoding.js';
+import { default as Encoding, Affine, Extend, Mix, Compose, ColorStop, BufferImage, base64ToU8 } from './Encoding.js';
+import { default as wasmInit, load_font_data, shape_text, get_glyph } from '../swash-tests/pkg/swash_tests.js';
 
 /*
 ( async () => {
@@ -10,88 +11,19 @@ import { default as Encoding, Affine, Extend, Mix, Compose, ColorStop, BufferIma
 window.nodeTest = async () => {
   const Arial = ( await import( '../fonts/Arial.js' ) ).default;
 
-  const loadScript = url => {
-    return new Promise( ( resolve, reject ) => {
-      const script  = document.createElement('script'),
-            head = document.head || document.getElementsByTagName('head')[0];
-            script.src = url;
-            script.async = true; // optionally
+  const wasm = await wasmInit();
 
-      head.insertBefore( script, head.firstChild );
-      script.addEventListener('load', function() {
-        resolve();
-      });
-      script.addEventListener('error', function() {
-        reject();
-      });
-    } )
-  };
+  const memory = wasm.memory;
 
-  // TODO: examine circle => quadratic, I see zoom icons looking very quadratic!!!
+  const arialBytes = base64ToU8( Arial );
 
-  await loadScript( '../vello-tests/lib/punycode.min.js' );
-  await loadScript( '../vello-tests/lib/shaping.js' );
-  window.kite = phet.kite;
+  load_font_data( arialBytes );
 
-  // TODO: newer harfbuzz. or cosmic-text might be nice
-  const scriptData = {
-    default: {
-      font: shaping.createBase64FontHandle( Arial ),
-      language: 'en',
-      script: shaping.Script.LATIN
-    }
-  };
-  // TODO: BOLD/ITALIC and other variations!!!
-  window.shapeText = ( text, direction ) => shaping.shapeRuns( text, direction, scriptData );
-
-  // glyphEncodingMap[ font ][ index ] = Encoding;
-  // NOTE: for fills only
-  const glyphEncodingMap = {};
-  const getGlyphEncoding = ( font, index ) => {
-    if ( !glyphEncodingMap[ font ] ) {
-      glyphEncodingMap[ font ] = {};
-    }
-    if ( glyphEncodingMap[ font ][ index ] === undefined ) {
-      const glyph = shaping.getGlyph( font, index );
-
-      const encoding = new PhetEncoding();
-
-      // TODO: tolerance? see if it's excessive
-      encoding.encode_kite_shape( glyph, true, false, 0.01 );
-
-      glyphEncodingMap[ font ][ index ] = encoding;
-    }
-    return glyphEncodingMap[ font ][ index ];
-  };
-  // TODO: allow both encoding types!
-  const getTextEncoding = ( text, direction ) => {
-    const shapedText = shapeText( text, direction );
-
-    const encoding = new Encoding();
-    let hasEncodedGlyph = false;
-
-    shapedText.glyphs.forEach( glyph => {
-      const glyphEncoding = getGlyphEncoding( glyph.font, glyph.index );
-
-      if ( glyphEncoding ) {
-        hasEncodedGlyph = true;
-
-        encoding.encode_transform( new Affine( 1, 0, 0, 1, glyph.x, glyph.y ) );
-        encoding.encode_linewidth( -1 );
-
-        encoding.append( glyphEncoding );
-      }
-    } );
-
-    if ( hasEncodedGlyph ) {
-      encoding.insert_path_marker();
-    }
-
-    return encoding;
-  };
-
-  window.getArialTextEncoding = getTextEncoding;
-
+  console.log( memory.buffer.byteLength );
+  console.log( shape_text( 'Hello, world!', true ) );
+  console.log( get_glyph( 43, 0, 0 ) );
+  console.log( get_glyph( 43, 60, 60 ) );
+  console.log( memory.buffer.byteLength );
 
   window.PhetEncoding = PhetEncoding;
 
@@ -218,18 +150,20 @@ export default class PhetEncoding extends Encoding {
       // TODO: support stroked text
       if ( node instanceof phet.scenery.Text ) {
         if ( node.hasFill() ) {
-          const shapedText = shapeText( node.renderedText, shaping.Direction.LTR );
+          const shapedText = JSON.parse( shape_text( node.renderedText, true ) );
 
           let hasEncodedGlyph = false;
 
           // TODO: more performance possible easily
-          const scale = node._font.numericSize;
-          const sizedMatrix = matrix.timesMatrix( phet.dot.Matrix3.scaling( scale ) );
+          const scale = node._font.numericSize / 2048; // get UPM
+          const sizedMatrix = matrix.timesMatrix( phet.dot.Matrix3.scaling( scale, -scale ) );
 
-          shapedText.glyphs.forEach( glyph => {
-            const shape = shaping.getGlyph( glyph.font, glyph.index );
+          let x = 0;
+          shapedText.forEach( glyph => {
+            const shape = new phet.kite.Shape( get_glyph( glyph.id, 0, 0 ) ); // TODO: bold! (italic with oblique transform!!)
 
-            const glyphMatrix = sizedMatrix.timesMatrix( phet.dot.Matrix3.translation( glyph.x, glyph.y ) );
+            const glyphMatrix = sizedMatrix.timesMatrix( phet.dot.Matrix3.translation( x + glyph.x, glyph.y ) );
+            x += glyph.adv;
 
             str += `encoding.encode_transform( new Affine( ${glyphMatrix.m00()}, ${glyphMatrix.m10()}, ${glyphMatrix.m01()}, ${glyphMatrix.m11()}, ${glyphMatrix.m02()}, ${glyphMatrix.m12()} ) );\n`;
             this.encode_transform( new Affine(
@@ -239,7 +173,7 @@ export default class PhetEncoding extends Encoding {
             str += `encoding.encode_linewidth( -1 );\n`;
             this.encode_linewidth( -1 );
             str += `encoding.encode_kite_shape( new phet.kite.Shape( '${shape.getSVGPath()}' ), true, false, 0.01 );\n`;
-            const encodedCount = this.encode_kite_shape( shape, true, false, 0.01 );
+            const encodedCount = this.encode_kite_shape( shape, true, false, 1 );
             if ( encodedCount ) {
               hasEncodedGlyph = true;
             }

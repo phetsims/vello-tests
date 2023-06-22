@@ -737,7 +737,7 @@ const u8ToBase64 = u8array => {
 	return window.btoa( string );
 }
 
-function base64ToU8( base64 ) {
+export function base64ToU8( base64 ) {
   const string = window.atob( base64 );
 
   var bytes = new Uint8Array( string.length );
