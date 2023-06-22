@@ -1240,6 +1240,7 @@ export default class Encoding {
     }
 
     // Transform stream
+    // TODO: Float32Array instead of Affine?
     layout.transform_base = size_to_words( dataBuf.byteLength );
     for ( let i = 0; i < this.transforms.length; i++ ) {
       const transform = this.transforms[ i ];
