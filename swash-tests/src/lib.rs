@@ -35,6 +35,9 @@ where
     }
 }
 
+// TODO: use resources in https://rustwasm.github.io/docs/book/reference/code-size.html and
+// TODO: https://github.com/rustwasm/wasm-snip in particular to reduce the size of all of this
+
 #[wasm_bindgen]
 pub fn shape_text(text: &str, is_ltr: bool) -> String {
     with_font_data(|font|{
@@ -78,8 +81,6 @@ pub fn get_glyph(id: u16, embolden_x: f32, embolden_y: f32) -> String {
             .build();
 
         let mut result = String::new();
-        result.push_str("[");
-        let mut is_first = true;
         if let Some(mut outline) = scaler.scale_outline(id) {
             if embolden_x != 0.0 || embolden_y != 0.0 {
                 outline.embolden(embolden_x, embolden_y);
@@ -89,41 +90,36 @@ pub fn get_glyph(id: u16, embolden_x: f32, embolden_y: f32) -> String {
 
             let mut point_index = 0;
             for verb in verbs {
-                if !is_first {
-                    result.push_str( "," );
-                }
-                is_first = false;
                 match verb {
                     Verb::MoveTo => {
                         let p = points[point_index];
                         point_index += 1;
-                        result.push_str( &format!( "{{t:\"move\",p:[{},{}]}}", p.x, p.y ) );
+                        result.push_str( &format!( "M {} {} ", p.x, p.y ) );
                     }
                     Verb::LineTo => {
                         let p = points[point_index];
                         point_index += 1;
-                        result.push_str( &format!( "{{t:\"line\",p:[{},{}]}}", p.x, p.y ) );
+                        result.push_str( &format!( "L {} {} ", p.x, p.y ) );
                     }
                     Verb::QuadTo => {
                         let p1 = points[point_index];
                         let p2 = points[point_index + 1];
                         point_index += 2;
-                        result.push_str( &format!( "{{t:\"quad\",p:[{},{},{},{}]}}", p1.x, p1.y, p2.x, p2.y ) );
+                        result.push_str( &format!( "Q {} {} {} {} ", p1.x, p1.y, p2.x, p2.y ) );
                     }
                     Verb::CurveTo => {
                         let p1 = points[point_index];
                         let p2 = points[point_index + 1];
                         let p3 = points[point_index + 2];
                         point_index += 3;
-                        result.push_str( &format!( "{{t:\"cubic\",p:[{},{},{},{},{},{}]}}", p1.x, p1.y, p2.x, p2.y, p3.x, p3.y ) );
+                        result.push_str( &format!( "C {} {} {} {} {} {}", p1.x, p1.y, p2.x, p2.y, p3.x, p3.y ) );
                     }
                     Verb::Close => {
-                        result.push_str( &format!( "{{t:\"close\"}}" ) );
+                        result.push_str( &format!( "Z " ) );
                     }
                 }
             }
         }
-        result.push_str("]");
         result
     })
 }
