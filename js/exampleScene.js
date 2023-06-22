@@ -1,11 +1,33 @@
 import { Affine, BufferImage } from './Encoding.js';
 import examplePhetScene from './examplePhetScene.js';
+import examplePhetScene2 from './examplePhetScene2.js';
+import examplePhetScene3 from './examplePhetScene3.js';
+import examplePhetScene4 from './examplePhetScene4.js';
 // import WASMEncoding from './WASMEncoding.js';
 import PhetEncoding from './PhetEncoding.js';
 
 let demoImage;
 
 let examplePhetSceneEncoding = null;
+let examplePhetScene2Encoding = null;
+let examplePhetScene3Encoding = null;
+let examplePhetScene4Encoding = null;
+
+let sceneIndex = 0;
+document.body.addEventListener( 'keydown', event => {
+  // On a right arrow key, advance to the next scene
+  if ( event.keyCode === 39 ) {
+    sceneIndex++;
+    sceneIndex %= 4;
+  }
+  // On a left arrow key, advance to the previous scene
+  else if ( event.keyCode === 37 ) {
+    sceneIndex--;
+    if ( sceneIndex < 0 ) {
+      sceneIndex = 3;
+    }
+  }
+} );
 
 const exampleScene = ( scale ) => {
 
@@ -118,6 +140,25 @@ const exampleScene = ( scale ) => {
     examplePhetSceneEncoding = new PhetEncoding();
     examplePhetScene( examplePhetSceneEncoding );
   }
+  if ( !examplePhetScene2Encoding ) {
+    examplePhetScene2Encoding = new PhetEncoding();
+    examplePhetScene2( examplePhetScene2Encoding );
+  }
+  if ( !examplePhetScene3Encoding ) {
+    examplePhetScene3Encoding = new PhetEncoding();
+    examplePhetScene3( examplePhetScene3Encoding );
+  }
+  if ( !examplePhetScene4Encoding ) {
+    examplePhetScene4Encoding = new PhetEncoding();
+    examplePhetScene4( examplePhetScene4Encoding );
+  }
+
+  const activeSceneEncoding = [
+    examplePhetSceneEncoding,
+    examplePhetScene2Encoding,
+    examplePhetScene3Encoding,
+    examplePhetScene4Encoding
+  ][ sceneIndex ];
 
   // const angle = Date.now() / 1000;
   // let c = Math.cos( angle );
@@ -200,16 +241,15 @@ const exampleScene = ( scale ) => {
   //   encoding.encode_color( 0x330000ff );
   // }
 
-
   const testIntermediateEncoding = new EncodingType();
-  testIntermediateEncoding.append( examplePhetSceneEncoding );
+  testIntermediateEncoding.append( activeSceneEncoding );
   const time = Date.now() / 1000;
   const mag = 30;
-  testIntermediateEncoding.append( examplePhetSceneEncoding, new Affine(
+  testIntermediateEncoding.append( activeSceneEncoding, new Affine(
     0.4, 0, 0, 0.4,
     50 + Math.cos( time ) * mag, 450 + Math.sin( time ) * mag
   ) );
-  testIntermediateEncoding.append( examplePhetSceneEncoding, new Affine(
+  testIntermediateEncoding.append( activeSceneEncoding, new Affine(
     3.5, 0, 0, 3.5,
     200 + Math.cos( time ) * mag - 120, 450 + Math.sin( time ) * mag - 40
   ) );

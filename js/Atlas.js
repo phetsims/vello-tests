@@ -1,5 +1,5 @@
 
-const ATLAS_INITIAL_SIZE = 1024;
+const ATLAS_INITIAL_SIZE = 2048; // TODO: revert to 1024, with sizing up (implement that!!)
 const ATLAS_MAX_SIZE = 8192;
 
 // Amount of space along the edge of each image that is filled with the closest adjacent pixel value. This helps

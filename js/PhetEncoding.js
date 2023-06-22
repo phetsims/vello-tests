@@ -39,6 +39,7 @@ window.nodeTest = async () => {
       script: shaping.Script.LATIN
     }
   };
+  // TODO: BOLD/ITALIC and other variations!!!
   window.shapeText = ( text, direction ) => shaping.shapeRuns( text, direction, scriptData );
 
   // glyphEncodingMap[ font ][ index ] = Encoding;
@@ -53,7 +54,7 @@ window.nodeTest = async () => {
 
       const encoding = new PhetEncoding();
 
-      // TODO: tolerance?
+      // TODO: tolerance? see if it's excessive
       encoding.encode_kite_shape( glyph, true, false, 0.01 );
 
       glyphEncodingMap[ font ][ index ] = encoding;
@@ -161,15 +162,41 @@ export default class PhetEncoding extends Encoding {
     };
 
     const recurse = node => {
-      if ( !node.visible ) {
+      if ( !node.visible || !node.bounds.isValid() ) {
         return;
       }
+
+      const hasClip = node.opacity !== 1 || node.clipArea;
 
       str += `// push ${node.constructor.name}\n`;
       let matrix = matrixStack[ matrixStack.length - 1 ];
       if ( !node.matrix.isIdentity() ) {
         matrix = matrix.timesMatrix( node.matrix );
         matrixStack.push( matrix );
+      }
+
+      if ( hasClip ) {
+        str += `encoding.encode_transform( new Affine( ${matrix.m00()}, ${matrix.m10()}, ${matrix.m01()}, ${matrix.m11()}, ${matrix.m02()}, ${matrix.m12()} ) );\n`;
+        this.encode_transform( matrixToAffine( matrix ) );
+
+        str += `encoding.encode_linewidth( -1 );\n`;
+        this.encode_linewidth( -1 );
+
+        if ( node.clipArea ) {
+          str += `encoding.encode_kite_shape( new phet.kite.Shape( '${node.clipArea.getSVGPath()}' ), true, true, 1 );\n`;
+          this.encode_kite_shape( node.clipArea, true, true, 1 );
+        }
+        else {
+          // Just handling opacity
+          const safeBoundingBox = node.localBounds.dilated( 100 ); // overdo it, how to clip without shape?
+          const safeBoundingShape = phet.kite.Shape.bounds( safeBoundingBox );
+
+          str += `encoding.encode_kite_shape( new phet.kite.Shape( '${safeBoundingShape.getSVGPath()}' ), true, true, 1 );\n`;
+          this.encode_kite_shape( safeBoundingShape, true, true, 1 );
+        }
+
+        str += `encoding.encode_begin_clip( ${node.opacity === 1 ? 'Mix.Normal' : 'Mix.Normal'}, Compose.SrcOver, ${node.opacity} );\n`;
+        this.encode_begin_clip( node.opacity === 1 ? Mix.Normal : Mix.Normal, Compose.SrcOver, node.opacity );
       }
 
       if ( node instanceof phet.scenery.Path ) {
@@ -260,6 +287,11 @@ export default class PhetEncoding extends Encoding {
       }
 
       node.children.forEach( child => recurse( child ) );
+
+      if ( hasClip ) {
+        str += `encoding.encode_end_clip();\n`;
+        this.encode_end_clip();
+      }
 
       if ( !node.matrix.isIdentity() ) {
         matrixStack.pop();
