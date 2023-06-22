@@ -106,6 +106,7 @@ export class ByteBuffer {
   }
 
   pushByteBuffer( byteBuffer ) {
+    // TODO: this is a hot spot, optimize
     this.ensureSpaceFor( byteBuffer._byteLength );
 
     this._u8Array.set( byteBuffer._u8Array.slice( 0, byteBuffer._byteLength ), this._byteLength );
@@ -174,6 +175,7 @@ export class ByteBuffer {
 
   // NOTE: this MAY truncate
   resize( byteLength = 0 ) {
+    // TODO: This is a hot-spot!
     byteLength = byteLength || this._arrayBuffer.byteLength * 2;
     byteLength = Math.ceil( byteLength / 4 ) * 4; // Round up to nearest 4 (for alignment)
     // Double the size of the _arrayBuffer by default, copying memory
@@ -198,6 +200,7 @@ export class Affine {
   }
 
   times( affine ) {
+    // TODO: Affine (and this method) are a hot spot IF we are doing client-side matrix stuff
     const a00 = this.a00 * affine.a00 + this.a01 * affine.a10;
     const a01 = this.a00 * affine.a01 + this.a01 * affine.a11;
     const a02 = this.a00 * affine.a02 + this.a01 * affine.a12 + this.a02;

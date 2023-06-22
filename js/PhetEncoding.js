@@ -27,6 +27,8 @@ window.nodeTest = async () => {
     } )
   };
 
+  // TODO: examine circle => quadratic, I see zoom icons looking very quadratic!!!
+
   await loadScript( '../vello-tests/lib/punycode.min.js' );
   await loadScript( '../vello-tests/lib/shaping.js' );
   window.kite = phet.kite;
