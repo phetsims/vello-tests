@@ -1,5 +1,3 @@
-import Atlas from './Atlas.js';
-
 const TILE_WIDTH = 16; // u32
 const TILE_HEIGHT = 16; // u32
 const PATH_REDUCE_WG = 256; // u32
@@ -243,18 +241,6 @@ export class BufferImage {
     this.height = height;
     this.buffer = buffer;
   }
-
-  serialize() {
-    return {
-      width: this.width,
-      height: this.height,
-      buffer: u8ToBase64( new Uint8Array( this.buffer ) )
-    };
-  }
-
-  static deserialize( data ) {
-    return new BufferImage( data.width, data.height, base64ToU8( data.buffer ).buffer );
-  }
 }
 
 export class Extend {
@@ -477,25 +463,6 @@ export class Layout {
     let start = this.path_tag_base * 4;
     let end = this.path_data_base * 4;
     return end - start;
-  }
-
-  serialize() {
-    return {
-      n_draw_objects: this.n_draw_objects,
-      n_paths: this.n_paths,
-      n_clips: this.n_clips,
-      bin_data_start: this.bin_data_start,
-      path_tag_base: this.path_tag_base,
-      path_data_base: this.path_data_base,
-      draw_tag_base: this.draw_tag_base,
-      draw_data_base: this.draw_data_base,
-      transform_base: this.transform_base,
-      linewidth_base: this.linewidth_base
-    };
-  }
-
-  static deserialize( data ) {
-    return new Layout( data );
   }
 }
 
@@ -758,18 +725,6 @@ export class RenderConfig {
 
     this.config_bytes = this.gpu.to_typed_array();
   }
-
-  serialize() {
-    return {
-      width: this.width,
-      height: this.height,
-      base_color: this.base_color
-    };
-  }
-
-  static deserialize( data, layout ) {
-    return new RenderConfig( layout, data.width, data.height, data.base_color );
-  }
 }
 
 const u8ToBase64 = u8array => {
@@ -803,58 +758,8 @@ export class RenderInfo {
     this.renderConfig = null; // generated with prepareRender
   }
 
-  // TODO: get serialization properly working? OR STRIP IT OUT
-  serialize() {
-    return {
-      packed: u8ToBase64( this.packed ),
-      layout: this.layout.serialize(),
-      ramps: {
-        width: this.ramps.width,
-        height: this.ramps.height,
-        data: u8ToBase64( this.ramps.data )
-      },
-      images: {
-        width: this.images.width,
-        height: this.images.height,
-        images: this.images.images.map( image => ( {
-          x: image.x,
-          y: image.y,
-          image: image.image.serialize()
-        } ) )
-      },
-      renderConfig: this.renderConfig === null ? null : this.renderConfig.serialize()
-    };
-  }
-
   prepareRender( width, height, base_color ) {
     this.renderConfig = new RenderConfig( this.layout, width, height, base_color );
-  }
-
-  static deserialize( data ) {
-    const renderInfo = new RenderInfo( {
-      packed: base64ToU8( data.packed ),
-      layout: Layout.deserialize( data.layout ),
-      ramps: {
-        width: data.ramps.width,
-        height: data.ramps.height,
-        data: base64ToU8( data.ramps.data )
-      },
-      images: {
-        width: data.images.width,
-        height: data.images.height,
-        images: data.images.images.map( image => ( {
-          x: image.x,
-          y: image.y,
-          image: BufferImage.deserialize( image.image )
-        } ) )
-      }
-    } );
-
-    if ( data.renderConfig !== null ) {
-      renderInfo.prepareRender( data.renderConfig.width, data.renderConfig.height, data.renderConfig.base_color );
-    }
-
-    return renderInfo;
   }
 }
 
@@ -1273,11 +1178,8 @@ export default class Encoding {
   /// layout and computed ramp data.
   resolve( deviceContext ) {
 
-    const rampPatches = this.patches.filter( patch => patch.type === 'ramp' );
-    deviceContext.ramps.updatePatches( rampPatches );
-
-    const imagePatches = this.patches.filter( patch => patch.type === 'image' );
-    deviceContext.atlas.updatePatches( imagePatches );
+    deviceContext.ramps.updatePatches( this.patches.filter( patch => patch.type === 'ramp' ) );
+    deviceContext.atlas.updatePatches( this.patches.filter( patch => patch.type === 'image' ) );
 
     const layout = new Layout();
     layout.n_paths = this.n_paths;

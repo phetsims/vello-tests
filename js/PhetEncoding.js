@@ -95,15 +95,8 @@ window.nodeTest = async () => {
 
   window.PhetEncoding = PhetEncoding;
 
-  window.encode = node => {
-    const encoding = new PhetEncoding();
-    encoding.encode_node( node );
-    return encoding.resolve().serialize();
-  };
-
-  // console.log( JSON.stringify( encode( phet.joist.display.rootNode.children[ 0 ].children[ 0 ].children[ 1 ].children[ 0 ].children[ 0 ] ) ) );
-  // console.log( JSON.stringify( encode( phet.joist.display.rootNode.children[ 0 ].children[ 0 ].children[ 1 ].children[ 0 ] ) ) );
-  console.log( JSON.stringify( encode( phet.joist.display.rootNode ) ) );
+  const encoding = new PhetEncoding();
+  encoding.encode_node( phet.joist.display.rootNode );
 };
 
 export default class PhetEncoding extends Encoding {

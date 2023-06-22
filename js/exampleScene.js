@@ -3,7 +3,6 @@ import examplePhetScene from './examplePhetScene.js';
 import examplePhetScene2 from './examplePhetScene2.js';
 import examplePhetScene3 from './examplePhetScene3.js';
 import examplePhetScene4 from './examplePhetScene4.js';
-// import WASMEncoding from './WASMEncoding.js';
 import PhetEncoding from './PhetEncoding.js';
 
 let demoImage;
