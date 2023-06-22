@@ -1288,25 +1288,12 @@ export default class Encoding {
 
     const imageWidth = 1024;
     const imageHeight = 1024;
-    const images = [];
-
-    const atlas = new Atlas();
 
     const rampPatches = this.patches.filter( patch => patch.type === 'ramp' );
-    deviceContext.allocateRampPatches( rampPatches );
+    deviceContext.updateRampPatches( rampPatches );
 
-    // deviceContext.allocateRampPatches( this.patches.filter( patch => patch.type === 'image' ) );
-
-    this.patches.forEach( patch => {
-      if ( patch.type === 'image' ) {
-        const pos = atlas.addImage( patch.image );
-
-        const atlasSubImage = new AtlasSubImage( patch.image, pos.x, pos.y );
-        patch.atlasSubImage = atlasSubImage
-
-        images.push( atlasSubImage );
-      }
-    } );
+    const imagePatches = this.patches.filter( patch => patch.type === 'image' );
+    deviceContext.updateImagePatches( imagePatches );
 
     const layout = new Layout();
     layout.n_paths = this.n_paths;
@@ -1393,16 +1380,10 @@ export default class Encoding {
     return new RenderInfo( {
       packed: dataBuf.u8Array,
       layout: layout,
-
-      ramps: {
-        width: rampPatches.length ? deviceContext.rampWidth : 0,
-        height: rampPatches.length ? deviceContext.rampHeight : 0,
-        data: deviceContext.rampArrayBuffer
-      },
       images: {
         width: imageWidth,
         height: imageHeight,
-        images: images
+        images: deviceContext.images
       }
     } );
   }

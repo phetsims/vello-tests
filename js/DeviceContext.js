@@ -1,4 +1,5 @@
-import { lerp_rgba8, to_premul_u32 } from './Encoding.js';
+import Atlas from './Atlas.js';
+import { AtlasSubImage, lerp_rgba8, to_premul_u32 } from './Encoding.js';
 
 const NUM_RAMP_SAMPLES = 512;
 const STARTING_RAMPS = 32;
@@ -16,10 +17,13 @@ export default class DeviceContext {
     this.rampTextureView = null;
 
     this.replaceRampTexture();
+
+    this.atlas = new Atlas();
+    this.images = [];
   }
 
   // @public
-  allocateRampPatches( patches ) {
+  updateRampPatches( patches ) {
     // TODO: actually do intelligent things, this is just to test it's working
 
     patches.forEach( ( patch, i ) => {
@@ -31,8 +35,20 @@ export default class DeviceContext {
   }
 
   // @public
-  allocateImagePatches( patches ) {
+  updateImagePatches( patches ) {
+    this.images.length = 0;
 
+    // TODO: actually keep this stuff!
+    this.atlas = new Atlas();
+
+    patches.forEach( patch => {
+      const pos = this.atlas.addImage( patch.image );
+
+      const atlasSubImage = new AtlasSubImage( patch.image, pos.x, pos.y );
+      patch.atlasSubImage = atlasSubImage
+
+      this.images.push( atlasSubImage );
+    } );
   }
 
   // @private

@@ -14,11 +14,6 @@ const render = ( renderInfo, deviceContext, outTexture ) => {
   const renderConfig = renderInfo.renderConfig;
   const sceneBytes = renderInfo.packed;
 
-  const ramps = renderInfo.ramps.data;
-  const rampsWidth = renderInfo.ramps.width;
-  const rampsHeight = renderInfo.ramps.height;
-  const hasRamps = rampsHeight > 0;
-
   const images = renderInfo.images.images;
   const imagesWidth = renderInfo.images.width;
   const imagesHeight = renderInfo.images.height;
