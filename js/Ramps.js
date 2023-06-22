@@ -8,7 +8,8 @@ export default class Ramps {
 
     this.device = device;
 
-    // TODO: don't hardcode this
+    // NOTE: we can increase the size in the future
+    // TODO: test the increase in size, and other ramp characteristics
     this.arrayBuffer = new ArrayBuffer( NUM_RAMP_SAMPLES * STARTING_RAMPS * 4 );
     this.arrayView = new DataView( this.arrayBuffer );
     this.width = NUM_RAMP_SAMPLES;
@@ -26,8 +27,6 @@ export default class Ramps {
 
   // @public
   updatePatches( patches ) {
-    // TODO: actually do intelligent things, this is just to test it's working
-
     const generation = this.generation++;
 
     patches.forEach( ( patch, i ) => {

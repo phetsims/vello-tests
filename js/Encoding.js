@@ -254,14 +254,6 @@ export class BufferImage {
   }
 }
 
-export class AtlasSubImage {
-  constructor( image, x, y ) {
-    this.image = image;
-    this.x = x;
-    this.y = y;
-  }
-}
-
 export class Extend {
   /// Extends the image by repeating the edge color of the brush.
   static Pad = 0;
@@ -1217,7 +1209,7 @@ export default class Encoding {
     this.patches.push( {
       type: 'image',
       draw_data_offset: this.drawDataBuf.byteLength,
-      image: image
+      image: image // BufferImage
     } );
     this.drawTagsBuf.pushU32( DrawTag.IMAGE );
 

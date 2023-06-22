@@ -24,6 +24,8 @@ wasmInit().then( async wasm => {
     throw new Error( 'need a browser that supports WebGPU' );
   }
 
+  // TODO: pooling of various resources we create (don't do much GC churn)
+
   // TODO: handle context losses, reconstruct with the device
   device.lost.then( info => {
     console.error( `WebGPU device was lost: ${info.message}` );
