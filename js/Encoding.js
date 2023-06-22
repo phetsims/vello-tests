@@ -239,9 +239,6 @@ export class ImageStub {
     this.width = width;
     this.height = height;
     this.buffer = buffer;
-    // TODO: don't have this mutate what we pass in as "parameters" to the encoding (allow images to be used with
-    // TODO: multiple encodings
-    this.xy = new Point( 0, 0 );
   }
 
   serialize() {
@@ -1277,17 +1274,9 @@ export default class Encoding {
     console.log( `n_open_clips\n${this.n_open_clips}` );
   }
 
-  // Shortcut method
-  prepareRender( deviceContext, width, height, base_color ) {
-    return this.resolve( deviceContext ).prepareRender( width, height, base_color );
-  }
-
   /// Resolves late bound resources and packs an encoding. Returns the packed
   /// layout and computed ramp data.
   resolve( deviceContext ) {
-
-    const imageWidth = 1024;
-    const imageHeight = 1024;
 
     const rampPatches = this.patches.filter( patch => patch.type === 'ramp' );
     deviceContext.updateRampPatches( rampPatches );
@@ -1379,12 +1368,7 @@ export default class Encoding {
 
     return new RenderInfo( {
       packed: dataBuf.u8Array,
-      layout: layout,
-      images: {
-        width: imageWidth,
-        height: imageHeight,
-        images: deviceContext.images
-      }
+      layout: layout
     } );
   }
 }

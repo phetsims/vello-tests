@@ -3,6 +3,7 @@ import { AtlasSubImage, lerp_rgba8, to_premul_u32 } from './Encoding.js';
 
 const NUM_RAMP_SAMPLES = 512;
 const STARTING_RAMPS = 32;
+const ATLAS_INITIAL_SIZE = 1024;
 
 export default class DeviceContext {
   constructor( device ) {
@@ -18,8 +19,17 @@ export default class DeviceContext {
 
     this.replaceRampTexture();
 
+    // TODO: Do we have "repeat" on images also? Think repeating patterns!
     this.atlas = new Atlas();
     this.images = [];
+
+    // TODO: atlas size (1) when no images?
+    this.atlasWidth = ATLAS_INITIAL_SIZE;
+    this.atlasHeight = ATLAS_INITIAL_SIZE;
+    this.atlasTexture = null;
+    this.atlasTextureView = null;
+
+    this.replaceAtlasTexture();
   }
 
   // @public
@@ -74,6 +84,27 @@ export default class DeviceContext {
   }
 
   // @private
+  replaceAtlasTexture() {
+    this.atlasTexture && this.atlasTexture.destroy();
+
+    this.atlasTexture = this.device.createTexture( {
+      label: 'atlasImage',
+      size: {
+        width: this.atlasWidth,
+        height: this.atlasHeight,
+        depthOrArrayLayers: 1
+      },
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+    } );
+    this.atlasTextureView = this.atlasTexture.createView( {
+      label: 'atlasImageView',
+      format: 'rgba8unorm',
+      dimension: '2d'
+    } );
+  }
+
+  // @private
   updateRampTexture() {
     this.device.queue.writeTexture( {
       texture: this.rampTexture
@@ -85,6 +116,29 @@ export default class DeviceContext {
       height: this.rampHeight,
       depthOrArrayLayers: 1
     } );
+  }
+
+  // @private
+  updateAtlasTexture() {
+    // TODO: don't draw in everything
+    for ( let i = 0; i < this.images.length; i++ ) {
+      const imageInfo = this.images[ i ]; // AtlasSubImage
+      const image = imageInfo.image; // ImageStub
+      const x = imageInfo.x;
+      const y = imageInfo.y;
+
+      this.device.queue.writeTexture( {
+        texture: this.atlasTexture,
+        origin: { x, y, z: 0 }
+      }, image.buffer, {
+        offset: 0,
+        bytesPerRow: image.width * 4
+      }, {
+        width: image.width,
+        height: image.height,
+        depthOrArrayLayers: 1
+      } );
+    }
   }
 
   // @private
@@ -115,20 +169,13 @@ export default class DeviceContext {
       let du = this_u - last_u;
       const u32 = to_premul_u32( du < 1e-9 ? this_c : lerp_rgba8( last_c, this_c, ( u - last_u ) / du ) );
       this.rampArrayView.setUint32( offset + i * 4, u32, false );
-      // buf.pushReversedU32( u32 );
     }
-    //
-    // for ( let i = 0; i < NUM_RAMP_SAMPLES; i++ ) {
-    //
-    //   const color = colorStops.getColor( i / ( NUM_RAMP_SAMPLES - 1 ) );
-    //   this.rampArrayView.setUint8( offset + i * 4 + 0, color.r * 255 );
-    //   this.rampArrayView.setUint8( offset + i * 4 + 1, color.g * 255 );
-    //   this.rampArrayView.setUint8( offset + i * 4 + 2, color.b * 255 );
-    //   this.rampArrayView.setUint8( offset + i * 4 + 3, color.a * 255 );
-    // }
   }
 
   dispose() {
     this.rampTexture && this.rampTexture.destroy();
+    this.atlasTexture && this.atlasTexture.destroy();
+
+    // TODO: destroy the device too?
   }
 }

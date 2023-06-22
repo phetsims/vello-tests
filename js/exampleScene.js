@@ -38,6 +38,7 @@ const exampleScene = ( scale ) => {
 
     // TODO: ramp and premultiply is causing things to be 1-off sometimes. Make it fully reproducible
 
+    // TODO: we'll need a device context to get this back to working
     const resolved = jsEncoding.prepareRender( 512, 512, 0x666666ff );
 
     console.log( '################ JS scene' );

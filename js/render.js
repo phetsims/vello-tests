@@ -14,11 +14,6 @@ const render = ( renderInfo, deviceContext, outTexture ) => {
   const renderConfig = renderInfo.renderConfig;
   const sceneBytes = renderInfo.packed;
 
-  const images = renderInfo.images.images;
-  const imagesWidth = renderInfo.images.width;
-  const imagesHeight = renderInfo.images.height;
-  const hasImages = images.length > 0;
-
   const workgroupCounts = renderConfig.workgroup_counts;
   const bufferSizes = renderConfig.buffer_sizes;
   const configBytes = renderConfig.config_bytes;
@@ -203,52 +198,11 @@ const render = ( renderInfo, deviceContext, outTexture ) => {
   // } );
 
   deviceContext.updateRampTexture();
-
-  // TODO: Do we have "repeat" on images also? Think repeating patterns! Also alpha
-  const atlasWidth = hasImages ? imagesWidth : 1;
-  const atlasHeight = hasImages ? imagesHeight : 1;
-  const atlasImage = device.createTexture( {
-    label: 'atlasImage',
-    size: {
-      width: atlasWidth,
-      height: atlasHeight,
-      depthOrArrayLayers: 1
-    },
-    format: 'rgba8unorm',
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
-  } );
-  const atlasImageView = atlasImage.createView( {
-    label: 'atlasImageView',
-    format: 'rgba8unorm',
-    dimension: '2d'
-  } );
-
-  if ( hasImages ) {
-    for ( let i = 0; i < images.length; i++ ) {
-      const imageInfo = images[ i ];
-      const image = imageInfo.image;
-      const x = imageInfo.x;
-      const y = imageInfo.y;
-
-      const block_size = 4;
-
-      device.queue.writeTexture( {
-        texture: atlasImage,
-        origin: { x, y, z: 0 }
-      }, image.buffer, {
-        offset: 0,
-        bytesPerRow: image.width * block_size
-      }, {
-        width: image.width,
-        height: image.height,
-        depthOrArrayLayers: 1
-      } );
-    }
-  }
+  deviceContext.updateAtlasTexture();
 
   // Have the fine-rasterization shader use the preferred format as output (for now)
   ( preferredFormat === 'bgra8unorm' ? shaders.fine_bgra8unorm : shaders.fine_rgba8unorm ).dispatch( encoder, workgroupCounts.fine, [
-    configBuffer, tileBuffer, segmentsBuffer, outTexture.createView(), ptclBuffer, deviceContext.rampTextureView, infoBinDataBuffer, atlasImageView
+    configBuffer, tileBuffer, segmentsBuffer, outTexture.createView(), ptclBuffer, deviceContext.rampTextureView, infoBinDataBuffer, deviceContext.atlasTextureView
   ] );
 
   // NOTE: bgra8unorm vs rgba8unorm can't be copied, so this depends on the platform?
@@ -274,8 +228,6 @@ const render = ( renderInfo, deviceContext, outTexture ) => {
 
   // for now TODO: can we reuse? Likely get some from reusing these
   configBuffer.destroy();
-  // gradientImage.destroy();
-  atlasImage.destroy();
 
   bufferPool.nextGeneration();
 };
