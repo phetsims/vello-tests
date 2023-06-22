@@ -17,17 +17,58 @@ export default class Ramps {
     this.textureView = null;
 
     this.replaceTexture();
+
+    this.ramps = []; // [ index ] => RampEntry
+    this.rampMap = new Map(); // RampEntry.getMapKey() => RampEntry
+    this.dirty = false; // initially because it's empty! -- done after replaceTexture() so we don't start dirty
+    this.generation = 0;
   }
 
   // @public
   updatePatches( patches ) {
     // TODO: actually do intelligent things, this is just to test it's working
 
-    patches.forEach( ( patch, i ) => {
-      patch.id = i;
+    const generation = this.generation++;
 
-      // TODO: rename to patch.colorStops;
-      this.writeRamp( i, patch.stops );
+    patches.forEach( ( patch, i ) => {
+      const mapKey = RampEntry.getMapKey( patch.stops );
+      let rampEntry = this.rampMap.get( mapKey );
+      if ( rampEntry ) {
+        rampEntry.generation = generation;
+        patch.id = rampEntry.index;
+      }
+      else {
+        let newIndex;
+
+        if ( this.ramps.length < this.height ) {
+          newIndex = this.ramps.length;
+        }
+        else {
+          const oldEntry = _.find( this.ramps, entry => entry.generation < generation - 1 );
+          if ( oldEntry ) {
+            this.rampMap.delete( oldEntry.getMapKey() );
+            newIndex = oldEntry.index;
+          }
+          else {
+            // Increase size!
+            this.height *= 2;
+            const newArrayBuffer = new ArrayBuffer( this.arrayBuffer.byteLength * 2 );
+            const newArrayView = new DataView( newArrayBuffer );
+            new Uint8Array( newArrayBuffer ).set( new Uint8Array( this.arrayBuffer ) ); // data copy (what is there)
+            this.arrayBuffer = newArrayBuffer;
+            this.arrayView = newArrayView;
+            this.replaceTexture();
+
+            newIndex = this.ramps.length;
+          }
+        }
+
+        rampEntry = new RampEntry( patch.stops, newIndex, generation );
+        this.ramps[ newIndex ] = rampEntry;
+        this.rampMap.set( mapKey, rampEntry );
+        patch.id = newIndex;
+        this.writeRamp( rampEntry.index, patch.stops );
+      }
     } );
   }
 
@@ -51,24 +92,32 @@ export default class Ramps {
       format: 'rgba8unorm',
       dimension: '2d'
     } );
+
+    this.dirty = true;
   }
 
   // @public
   updateTexture() {
-    this.device.queue.writeTexture( {
-      texture: this.texture
-    }, this.arrayBuffer, {
-      offset: 0,
-      bytesPerRow: this.width * 4
-    }, {
-      width: this.width,
-      height: this.height,
-      depthOrArrayLayers: 1
-    } );
+    if ( this.dirty ) {
+      this.dirty = false;
+
+      this.device.queue.writeTexture( {
+        texture: this.texture
+      }, this.arrayBuffer, {
+        offset: 0,
+        bytesPerRow: this.width * 4
+      }, {
+        width: this.width,
+        height: this.height,
+        depthOrArrayLayers: 1
+      } );
+    }
   }
 
   // @private
   writeRamp( index, colorStops ) {
+    this.dirty = true;
+
     const offset = index * NUM_RAMP_SAMPLES * 4;
 
     let last_u = 0.0;
@@ -100,5 +149,21 @@ export default class Ramps {
 
   dispose() {
     this.texture && this.texture.dispose();
+  }
+}
+
+class RampEntry {
+  constructor( colorStops, index, generation ) {
+    this.colorStops = colorStops;
+    this.index = index;
+    this.generation = generation;
+  }
+
+  getMapKey() {
+    return RampEntry.getMapKey( this.colorStops );
+  }
+
+  static getMapKey( colorStops ) {
+    return colorStops.map( colorStop => `${colorStop.offset}-${colorStop.color}` ).join( ',' );
   }
 }

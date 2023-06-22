@@ -81,6 +81,8 @@ export default class Atlas {
       const x = imageInfo.x;
       const y = imageInfo.y;
 
+      // TODO: we have the ability to do this in a single call, would that be better ever for performance? Maybe a single
+      // TODO: call if we have to update a bunch of sections at once?
       this.device.queue.writeTexture( {
         texture: this.texture,
         origin: { x, y, z: 0 }
