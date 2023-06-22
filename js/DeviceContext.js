@@ -12,40 +12,10 @@ export default class DeviceContext {
     this.rampArrayView = new DataView( this.rampArrayBuffer );
     this.rampWidth = NUM_RAMP_SAMPLES;
     this.rampHeight = STARTING_RAMPS;
+    this.rampTexture = null;
+    this.rampTextureView = null;
 
-
-    // const gradientImage = device.createTexture( {
-    //   label: 'gradientImage',
-    //   size: {
-    //     width: gradientWidth,
-    //     height: gradientHeight,
-    //     depthOrArrayLayers: 1
-    //   },
-    //   format: 'rgba8unorm',
-    //   usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
-    // } );
-    //
-    // const gradientImageView = gradientImage.createView( {
-    //   label: 'gradientImageView',
-    //   format: 'rgba8unorm',
-    //   dimension: '2d'
-    // } );
-    //
-    //
-    // if ( hasRamps ) {
-    //   const block_size = 4;
-    //   device.queue.writeTexture( {
-    //     texture: gradientImage
-    //   }, ramps.buffer, {
-    //     offset: 0,
-    //     bytesPerRow: rampsWidth * block_size
-    //   }, {
-    //     width: gradientWidth,
-    //     height: gradientHeight,
-    //     depthOrArrayLayers: 1
-    //   } );
-    // }
-
+    this.replaceRampTexture();
   }
 
   // @public
@@ -63,6 +33,41 @@ export default class DeviceContext {
   // @public
   allocateImagePatches( patches ) {
 
+  }
+
+  // @private
+  replaceRampTexture() {
+    this.rampTexture && this.rampTexture.destroy();
+
+    this.rampTexture = this.device.createTexture( {
+      label: 'rampTexture',
+      size: {
+        width: this.rampWidth,
+        height: this.rampHeight,
+        depthOrArrayLayers: 1
+      },
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+    } );
+
+    this.rampTextureView = this.rampTexture.createView( {
+      label: 'rampTextureView',
+      format: 'rgba8unorm',
+      dimension: '2d'
+    } );
+  }
+
+  updateRampTexture() {
+    this.device.queue.writeTexture( {
+      texture: this.rampTexture
+    }, this.rampArrayBuffer, {
+      offset: 0,
+      bytesPerRow: this.rampWidth * 4
+    }, {
+      width: this.rampWidth,
+      height: this.rampHeight,
+      depthOrArrayLayers: 1
+    } );
   }
 
   // @private
@@ -106,4 +111,7 @@ export default class DeviceContext {
     // }
   }
 
+  dispose() {
+    this.rampTexture && this.rampTexture.destroy();
+  }
 }
