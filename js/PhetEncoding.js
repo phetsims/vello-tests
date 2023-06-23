@@ -156,13 +156,25 @@ export default class PhetEncoding extends Encoding {
 
           // TODO: more performance possible easily
           const scale = node._font.numericSize / 2048; // get UPM
-          const sizedMatrix = matrix.timesMatrix( phet.dot.Matrix3.scaling( scale, -scale ) );
+          const sizedMatrix = matrix.timesMatrix( phet.dot.Matrix3.scaling( scale ) );
+          const shearMatrix = phet.dot.Matrix3.rowMajor(
+            // approx 14 degrees, with always vertical flip
+            1, node._font.style !== 'normal' ? 0.2419 : 0, 0,
+            0, -1, 0, // vertical flip
+            0, 0, 1
+          );
+
+          let embolden = 0;
+          if ( node._font.weight === 'bold' ) {
+            embolden = 25;
+          }
 
           let x = 0;
           shapedText.forEach( glyph => {
-            const shape = new phet.kite.Shape( get_glyph( glyph.id, 0, 0 ) ); // TODO: bold! (italic with oblique transform!!)
+            const shape = new phet.kite.Shape( get_glyph( glyph.id, embolden, embolden ) ); // TODO: bold! (italic with oblique transform!!)
 
-            const glyphMatrix = sizedMatrix.timesMatrix( phet.dot.Matrix3.translation( x + glyph.x, glyph.y ) );
+            // TODO: check whether the glyph y needs to be reversed! And italics/oblique
+            const glyphMatrix = sizedMatrix.timesMatrix( phet.dot.Matrix3.translation( x + glyph.x, glyph.y ) ).timesMatrix( shearMatrix );
             x += glyph.adv;
 
             str += `encoding.encode_transform( new Affine( ${glyphMatrix.m00()}, ${glyphMatrix.m10()}, ${glyphMatrix.m01()}, ${glyphMatrix.m11()}, ${glyphMatrix.m02()}, ${glyphMatrix.m12()} ) );\n`;
