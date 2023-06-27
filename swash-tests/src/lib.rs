@@ -1,57 +1,47 @@
 use wasm_bindgen::prelude::*;
-use swash::{FontRef, FontDataRef, shape::{ShapeContext, Direction}, text::Script, scale::ScaleContext, zeno::Verb};
-use std::cell::RefCell;
+use swash::{FontDataRef, shape::{ShapeContext, Direction}, text::Script, scale::ScaleContext, zeno::Verb};
 
 // Install rust
 // Ensure we have wasm32 target with `rustup target add wasm32-unknown-unknown`
 // Install wasm-pack
 // Build with: `wasm-pack build --target web swash-tests`
 
-static mut FONT_PTR: u64 = 0;
-static mut FONT_DATA: [u8; 23278008] = [0; 23278008]; // TODO: don't hardcode font file size!!
+#[wasm_bindgen]
+pub struct SwashFont {
+    data: Vec<u8>
+}
 
 #[wasm_bindgen]
-pub fn load_font_data(font_data: js_sys::Uint8Array) {
-    unsafe {
-        font_data.raw_copy_to_ptr( FONT_DATA.as_mut_ptr() );
-    }
-
-    unsafe {
-        let font_data = FontDataRef::new(&FONT_DATA).expect( "Font load issues" );
-
-        if let Some(font) = font_data.get(0) {
-            FONT_PTR = Box::into_raw(Box::new(RefCell::new(font))) as u64;
+impl SwashFont {
+    #[wasm_bindgen(constructor)]
+    pub fn new(data: js_sys::Uint8Array) -> SwashFont {
+        SwashFont {
+            data: data.to_vec()
         }
     }
-}
 
-fn with_font_data<F, R>(f: F) -> R
-where
-    F: FnOnce(&FontRef) -> R,
-{
-    unsafe {
-        let me = FONT_PTR as *mut RefCell<FontRef>;
-        return f( &(*me).borrow() );
-    }
-}
+    pub fn shape_text(&self, text: &str, is_ltr: bool) -> String {
+        let font = FontDataRef::new(&self.data).unwrap().get(0).unwrap();
 
-// TODO: use resources in https://rustwasm.github.io/docs/book/reference/code-size.html and
-// TODO: https://github.com/rustwasm/wasm-snip in particular to reduce the size of all of this
-
-#[wasm_bindgen]
-pub fn shape_text(text: &str, is_ltr: bool) -> String {
-    with_font_data(|font|{
         let mut context = ShapeContext::new();
 
         // TODO: cache shapers, it's just difficult with the lifetime stuff
-        let mut shaper_builder = context.builder(*font);
+        let mut shaper_builder = context.builder(font);
         shaper_builder = shaper_builder.script(Script::Latin);
         shaper_builder = shaper_builder.direction(if is_ltr { Direction::LeftToRight } else { Direction::RightToLeft });
 
-        let mut shaper = shaper_builder.build();
+        // TODO: do we need to kern?
+        // shaper_builder = shaper_builder.features(&[("kern", 1)]);
 
-        // TODO: embolden 0.25
-        // TODO: skew 14 deg
+        // font.features().into_iter().for_each(|feature| {
+        //     if let Some(name) = feature.name() {
+        //         web_sys::console::log_1( &JsValue::from( format!( "feature name: {}", name ) ) );
+        //     }
+        //     // tag (u32), name (option static string), action
+        //     // shaper_builder = shaper_builder.features(feature);
+        // });
+
+        let mut shaper = shaper_builder.build();
 
         shaper.add_str(text);
 
@@ -69,14 +59,12 @@ pub fn shape_text(text: &str, is_ltr: bool) -> String {
         });
         result.push_str("]");
         result
-    })
-}
+    }
+    pub fn get_glyph(&self, id: u16, embolden_x: f32, embolden_y: f32) -> String {
+        let font = FontDataRef::new(&self.data).unwrap().get(0).unwrap();
 
-#[wasm_bindgen]
-pub fn get_glyph(id: u16, embolden_x: f32, embolden_y: f32) -> String {
-    with_font_data(|font|{
         let mut context = ScaleContext::new();
-        let mut scaler = context.builder(*font)
+        let mut scaler = context.builder(font)
             .hint(false)
             .build();
 
@@ -121,7 +109,7 @@ pub fn get_glyph(id: u16, embolden_x: f32, embolden_y: f32) -> String {
             }
         }
         result
-    })
+    }
 }
 
 #[wasm_bindgen(start)]
