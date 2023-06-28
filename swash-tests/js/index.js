@@ -27,6 +27,8 @@ wasmInit().then( async wasm => {
   // arial3.free();
   // console.log( memory.buffer.byteLength );
 
+  console.log( arial.get_units_per_em() );
+
   const show = str => {
     console.log( memory.buffer.byteLength );
     const scene = new phet.scenery.Node();

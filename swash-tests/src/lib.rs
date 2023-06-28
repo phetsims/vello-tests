@@ -20,6 +20,14 @@ impl SwashFont {
         }
     }
 
+    pub fn get_units_per_em(&self) -> u16 {
+        let font = FontDataRef::new(&self.data).unwrap().get(0).unwrap();
+
+        let mut context = ShapeContext::new();
+
+        context.builder(font).build().metrics().units_per_em
+    }
+
     pub fn shape_text(&self, text: &str, is_ltr: bool) -> String {
         let font = FontDataRef::new(&self.data).unwrap().get(0).unwrap();
 
